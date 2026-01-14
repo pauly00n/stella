@@ -64,11 +64,29 @@ function ChatPageContent({ chatID }: { chatID: string }) {
 
   // Pending assistant: one user message and at least one assistant message
   // whose meta.status is not 'complete' (e.g., placeholder or in-progress).
+  // Also show pending if mode is 'auto' and we have exactly one user message
+  // (even if assistant messages haven't been loaded yet).
   const shouldShowPendingAssistant = useMemo(() => {
     const userMessages = messages.filter((m) => m.role === 'user');
     const assistantMessages = messages.filter((m) => m.role !== 'user');
 
-    if (userMessages.length !== 1 || assistantMessages.length === 0) {
+    // If we have exactly one user message and mode is 'auto', show pending assistant
+    // (this handles the case where the generate API is still processing)
+    if (userMessages.length === 1 && chat?.default_task === 'auto') {
+      // If we have assistant messages, check if any are not complete
+      if (assistantMessages.length > 0) {
+        return assistantMessages.some((m) => {
+          const meta = (m.meta || {}) as any;
+          const status = meta.status;
+          return status && status !== 'complete';
+        });
+      }
+      // If no assistant messages yet but mode is auto, show pending
+      // (the generate API might still be creating the placeholder)
+      return true;
+    }
+
+    if (userMessages.length !== 1 && assistantMessages.length === 0) {
       return false;
     }
 
@@ -78,16 +96,17 @@ function ChatPageContent({ chatID }: { chatID: string }) {
       const status = meta.status;
       return status && status !== 'complete';
     });
-  }, [messages]);
+  }, [messages, chat]);
 
   // Check if we should show "Searching images..." when text is loaded but images aren't
   const shouldShowSearchingImages = useMemo(() => {
     if (!latestAssistantMessage) return false;
     const meta = (latestAssistantMessage.meta || {}) as any;
     const wantImages = !!meta.showImages;
+    const task = meta.task;
     const hasImages = Array.isArray(meta.images) && meta.images.length > 0;
     // Show "Searching images..." if images were requested but not yet loaded
-    return wantImages && !hasImages && !shouldShowPendingAssistant;
+    return wantImages && task !== 'none' && !hasImages && !shouldShowPendingAssistant;
   }, [latestAssistantMessage, shouldShowPendingAssistant]);
 
   // Determine thinking phase based on message meta.status
@@ -149,17 +168,18 @@ function ChatPageContent({ chatID }: { chatID: string }) {
     }
   }, [shouldShowPendingAssistant, chat, latestAssistantMessage, shouldShowSearchingImages]);
 
-  // If images were requested but not yet attached, trigger image-generation POST
+  // If images were requested but not yet attached and task is not 'none', trigger image-generation POST
   useEffect(() => {
     if (!latestAssistantMessage) return;
     const meta = (latestAssistantMessage.meta || {}) as any;
     const wantImages = !!meta.showImages;
     const hasImagesArray = Array.isArray(meta.images) && meta.images.length > 0;
     const status = meta.status;
+    const task = meta.task;
     const hasContent = latestAssistantMessage.content && latestAssistantMessage.content.trim().length > 0;
 
-    // Only trigger if: images wanted, no images yet, not already started, and message is complete with content
-    if (!wantImages || hasImagesArray || imagesRequestStarted || !hasContent || status !== 'complete') return;
+    // Only trigger if: images wanted, no images yet, not already started, message is complete with content, and task isn't 'none'
+    if (!wantImages || hasImagesArray || imagesRequestStarted || !hasContent || status !== 'complete' || task === 'none') return;
 
     setImagesRequestStarted(true);
 
@@ -259,17 +279,33 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                           </Card>
                         </div>
                       ) : (
-                        <div className="pt-5 pb-5 w-full">
-                          <div className="text-sm whitespace-pre-wrap text-left max-w-[650px] w-full mx-auto">
-                            {message.content}
-                          </div>
-                        </div>
+                        // Only render assistant message if it has content or is complete
+                        // (skip placeholder messages that are still being generated)
+                        (() => {
+                          const meta = (message.meta || {}) as any;
+                          const status = meta.status;
+                          const hasContent = message.content && message.content.trim().length > 0;
+                          const isComplete = status === 'complete';
+                          
+                          // Skip rendering if it's a placeholder (no content and not complete)
+                          if (!hasContent && !isComplete) {
+                            return null;
+                          }
+                          
+                          return (
+                            <div className="pt-5 pb-5 w-full">
+                              <div className="text-sm whitespace-pre-wrap text-left max-w-[650px] w-full mx-auto">
+                                {message.content}
+                              </div>
+                            </div>
+                          );
+                        })()
                       )}
                       {/* Show "Searching images..." after the last user message, before assistant messages */}
                       {isLastUserMessage && hasAssistantMessages && shouldShowSearchingImages && (
                         <div className="pt-3 max-w-[650px] w-full">
                             <span className="text-muted-foreground text-sm animate-pulse">
-                              Searching images...
+                              Searching for images...
                             </span>
                         </div>
                       )}
@@ -278,7 +314,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                 })}
 
                 {(shouldShowPendingAssistant) && (
-                  <div className="pt-2 max-w-[650px] w-full">
+                  <div className="pt-10 max-w-[650px] w-full">
                     {thinkingPhase && (
                       <div className="mb-3">
                       <span className="text-muted-foreground text-sm animate-pulse">
