@@ -362,7 +362,8 @@ function ChatPageContent({ chatID }: { chatID: string }) {
               {assistantImages.map((img: any, idx: number) => {
                 // Prefer full image link for clarity; fall back to thumbnail if needed.
                 const thumb = img.link || img.image?.thumbnailLink || img.thumbnailLink;
-                const href = img.link || img.image?.contextLink || '#';
+                // Prefer the source page (contextLink) over the direct image URL
+                const href = img.image?.contextLink || img.contextLink || img.link || '#';
                 const title = img.title || img.snippet || 'Related image';
                 return (
                   <a

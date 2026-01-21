@@ -354,6 +354,7 @@ export interface GenerateResponse {
   type?: string;
   result?: string;
   images?: ImageResult[];
+  imageQuery?: string;
   error?: string;
 }
 
@@ -368,6 +369,11 @@ export interface ImageResult {
     width: number;
     height: number;
   };
+}
+
+export interface ImageGenerationResult {
+  images: ImageResult[];
+  imageQuery?: string;
 }
 
 /**
@@ -540,16 +546,18 @@ async function searchImages(query: string): Promise<ImageResult[]> {
  * Image generation-only helper.
  * Runs keyword extraction on the given draft and performs image search.
  */
-export async function generateImagesForDraft(draft: string): Promise<ImageResult[]> {
+export async function generateImagesForDraft(draft: string): Promise<ImageGenerationResult> {
   let images: ImageResult[] = [];
+  let imageQuery: string | undefined;
 
   try {
     if (!draft || !draft.trim()) {
-      return [];
+      return { images, imageQuery };
     }
 
     const keywordPrompt = KEYWORD_EXTRACTION_FOR_SEARCH_API + draft;
     const keywordResponse = await callGemini(keywordPrompt);
+    imageQuery = keywordResponse;
 
     // Clean and parse JSON response
     let cleanedResponse = keywordResponse.trim();
@@ -573,7 +581,7 @@ export async function generateImagesForDraft(draft: string): Promise<ImageResult
     // Continue even if image search fails
   }
 
-  return images;
+  return { images, imageQuery };
 }
 
 /**
@@ -601,8 +609,11 @@ export async function generateReport(request: GenerateRequest): Promise<Generate
     const aiText = await callGemini(prompt);
 
     let images: ImageResult[] = [];
+    let imageQuery: string | undefined;
     if (includeImages) {
-      images = await generateImagesForDraft(draft);
+      const imageResult = await generateImagesForDraft(draft);
+      images = imageResult.images;
+      imageQuery = imageResult.imageQuery;
     }
 
     return {
@@ -610,6 +621,7 @@ export async function generateReport(request: GenerateRequest): Promise<Generate
       type: reportType,
       result: aiText,
       images,
+      imageQuery,
     };
   } catch (error) {
     console.error('Error in generateReport:', error);

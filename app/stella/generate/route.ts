@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
       }
 
       const imageStart = Date.now();
-      const generatedImages = await generateImagesForDraft(trimmedDraft);
+      const { images: generatedImages, imageQuery } = await generateImagesForDraft(trimmedDraft);
       const imageLatency = Date.now() - imageStart;
 
       // Find target assistant message to update
@@ -156,6 +156,7 @@ export async function POST(request: NextRequest) {
         images: generatedImages,
         latencyMs: previousLatency + imageLatency,
         showImages: true,
+        imageQuery,
       };
 
       const { error: updateError } = await supabase
