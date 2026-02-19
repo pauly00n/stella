@@ -1,13 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import { ThemeProvider } from '@/components/theme-provider';
 import ConditionalLayout from '@/components/conditional-layout';
-
-const inter = Inter({
-    subsets: ['latin'],
-    variable: '--font-inter',
-});
 
 export const metadata: Metadata = {
     title: 'Paul Yoon',
@@ -43,7 +37,7 @@ export default function RootLayout({
                     }}
                 />
             </head>
-            <body className={`${inter.className} min-h-screen flex flex-col bg-gradient-to-b from-background to-muted/20`}>
+            <body className="min-h-screen flex flex-col bg-gradient-to-b from-background to-muted/20">
                 <ThemeProvider
                     attribute="class"
                     defaultTheme="light"

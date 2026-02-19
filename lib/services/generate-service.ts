@@ -503,7 +503,7 @@ async function searchImages(query: string): Promise<ImageResult[]> {
     url.searchParams.set('cx', CX);
     url.searchParams.set('q', query);
     url.searchParams.set('searchType', 'image');
-    url.searchParams.set('num', '5');
+    url.searchParams.set('num', '8');
     url.searchParams.set('imgSize', 'MEDIUM');
     url.searchParams.set('safe', 'active');
 
