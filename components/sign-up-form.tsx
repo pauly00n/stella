@@ -17,6 +17,18 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AUTH_ROUTES } from "@/lib/auth/routes";
 
+function getErrorCode(error: unknown): string | number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const candidate = error as { status?: unknown; code?: unknown };
+  if (typeof candidate.code === "string" || typeof candidate.code === "number") {
+    return candidate.code;
+  }
+  if (typeof candidate.status === "string" || typeof candidate.status === "number") {
+    return candidate.status;
+  }
+  return undefined;
+}
+
 export function SignUpForm({
   className,
   ...props
@@ -58,7 +70,7 @@ export function SignUpForm({
         
         // Check if the error is about user already existing
         const errorMessage = (error.message || '').toLowerCase();
-        const errorCode = error.status || (error as any).code || '';
+        const errorCode = getErrorCode(error) ?? '';
         
         // Check various possible error messages and status codes
         if (errorMessage.includes('already registered') || 

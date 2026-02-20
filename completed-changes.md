@@ -165,3 +165,67 @@ The modified codebase was repeatedly validated after major changes with:
 - `npm run build`
 
 Final state at time of this summary: all three commands pass.
+
+## 9. Reliability and Async Processing Upgrades
+
+### Hybrid push + polling updates
+- `hooks/use-messages.ts`
+  - Added Supabase Realtime subscription for `messages` changes by `chat_id`.
+  - Exposed `realtimeConnected` status to callers.
+- `app/stella/[chatID]/page.tsx`
+  - Updated polling strategy to hybrid mode:
+    - Realtime push is used when available.
+    - Polling still runs while pending (reliability backstop for intermediate updates).
+    - Adaptive interval (`2500ms` when realtime connected, `2000ms` otherwise).
+
+### Idempotency for generation requests
+- `components/chatbox.tsx`
+  - Sends `idempotencyKey` (`crypto.randomUUID()`) on `response` generation calls.
+- `lib/schemas/chat.ts`
+  - Added `idempotencyKey` support in generate request/meta schema.
+- `app/stella/generate/route.ts`
+  - Added idempotency lookup path (`meta.idempotencyKey`) before generation.
+  - Returns existing assistant message result when duplicate key is detected.
+  - Persists `idempotencyKey` in assistant message metadata.
+
+### Timeout + retry/backoff for provider calls
+- `lib/services/generate-service.ts`
+  - Added `fetchWithRetry` helper with:
+    - Abort timeout
+    - bounded exponential backoff
+    - retry on transient status codes / transport errors
+  - Routed Gemini and Google image-search requests through this helper.
+
+## 10. Observability and Operations Upgrade
+
+### Structured server logging
+- Added `lib/observability/logger.ts`:
+  - JSON log entries with stable fields (`timestamp`, `level`, `event`, context).
+  - Safe error serialization.
+  - Request-scoped logger API.
+- Integrated structured logging into:
+  - `app/stella/generate/route.ts`
+  - `app/api/stella/chats/route.ts`
+  - `app/api/stella/chats/[chatID]/route.ts`
+  - `app/api/stella/chats/[chatID]/messages/route.ts`
+- Added request IDs (`x-request-id` passthrough or generated) in route logging context.
+
+## 11. Security and Abuse Controls (Phase 1)
+
+### Rate limiting on generation endpoint
+- Added `lib/security/rate-limit.ts`:
+  - Fixed-window, in-memory per-instance counters.
+  - operation scopes:
+    - `generate:response`
+    - `generate:images`
+- Integrated in `app/stella/generate/route.ts`:
+  - Enforces limits before provider work starts.
+  - Configurable via env:
+    - `RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE`
+    - `RATE_LIMIT_GENERATE_IMAGES_PER_MINUTE`
+  - Returns `429` with:
+    - `Retry-After`
+    - `X-RateLimit-Limit`
+    - `X-RateLimit-Remaining`
+    - `X-RateLimit-Reset`
+  - Emits structured `generate.rate_limited` warning event.

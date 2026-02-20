@@ -17,6 +17,7 @@ import {
 } from '@/lib/schemas/chat';
 import { createRequestLogger } from '@/lib/observability/logger';
 import { checkRateLimit } from '@/lib/security/rate-limit';
+import { serverEnv } from '@/lib/env/server';
 
 function mapUiModeToInternalTask(
   mode: TaskType,
@@ -93,8 +94,8 @@ export async function POST(request: NextRequest) {
     const limit =
       Number(
         isImageOperation
-          ? process.env.RATE_LIMIT_GENERATE_IMAGES_PER_MINUTE
-          : process.env.RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE
+          ? serverEnv.RATE_LIMIT_GENERATE_IMAGES_PER_MINUTE
+          : serverEnv.RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE
       ) || (isImageOperation ? 10 : 20);
 
     const rateLimit = await checkRateLimit({

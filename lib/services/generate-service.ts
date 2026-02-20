@@ -2,10 +2,11 @@
  * Generate API Service
  * Implements the report generation logic using Gemini AI and Google Custom Search
  */
+import { serverEnv } from '@/lib/env/server';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
-const CX = process.env.SEARCH_CX || '';
+const GEMINI_API_KEY = serverEnv.GEMINI_API_KEY;
+const SEARCH_API_KEY = serverEnv.SEARCH_API_KEY || '';
+const CX = serverEnv.SEARCH_CX || '';
 const PROVIDER_TIMEOUT_MS = 30000;
 const PROVIDER_MAX_RETRIES = 2;
 

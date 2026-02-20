@@ -33,8 +33,6 @@
 ## 3. Observability and Operations
 
 ### Required changes
-- Replace ad-hoc `console.log` with structured logging.
-- Add correlation/request IDs from frontend -> API -> provider calls.
 - Capture metrics:
   - latency by phase (task select, generation, image search)
   - error rates by endpoint/provider
@@ -44,7 +42,6 @@
 ## 4. Security and Abuse Controls
 
 ### Required changes
-- Add route-level rate limiting for generation endpoints.
 - Add abuse throttling per user/IP and anomaly detection.
 - Add prompt/content moderation guardrails before and after generation.
 - Sanitize/normalize all externally sourced content before rendering/storage.
@@ -113,7 +110,6 @@
 - Introduce typed `MessageMeta` + Zod validation.
 - Remove `any` in core flows.
 - Add structured logging + request IDs.
-- Add generation endpoint rate limiting.
 
 ### Phase 2 (1-2 weeks): Reliability
 - Add integration and E2E tests for auth + generation.

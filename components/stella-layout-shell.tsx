@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react';
 import StellaSidebar from '@/components/stella-sidebar';
 import StellaHeader from '@/components/stella-header';
 import { createClient } from '@/lib/supabase/client';
+import type { User } from '@supabase/supabase-js';
 
 export function StellaLayoutShell({ children }: { children: React.ReactNode }) {
   // Sidebar expanded/collapsed state with persistence in localStorage.
   const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
   const [mounted, setMounted] = useState(false);
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   // Avoid hydration issues: only mark mounted on client.
@@ -88,5 +89,4 @@ export function StellaLayoutShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
 
