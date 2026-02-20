@@ -116,13 +116,25 @@ export function Chatbox() {
   const getPlaceholder = (): string => {
     switch (task) {
       case 'Auto':
-        return 'Enter a radiology draft report or any clinical / imaging description…';
-      case 'Refine draft report':
-        return 'Enter a radiology draft report…';
-      case 'Differential diagnostic':
-        return 'Enter any clinical / imaging description…';
+        return 'Describe imaging findings, mass characteristics, or clinical history…';
+      case 'Tumor':
+        return 'Describe the mass/lesion imaging features (T1, T2, location, margins, enhancement)…';
+      case 'Arthritis':
+        return 'Describe joint findings, erosions, joint space narrowing, cartilage loss…';
+      case 'Trauma':
+        return 'Describe injury mechanism and imaging findings (fracture, ligament, bone contusion)…';
+      case 'Infection':
+        return 'Describe findings: marrow signal, soft tissue changes, enhancement pattern…';
+      case 'AVN':
+        return 'Describe bone/joint findings and relevant patient history…';
+      case 'Inflammatory':
+        return 'Describe tendon, bursa, or synovial findings…';
+      case 'Developmental':
+        return 'Describe structural or morphologic findings…';
+      case 'Vascular':
+        return 'Describe bone signal, distribution, and metabolic context…';
       default:
-        return 'Enter a radiology draft report or any clinical / imaging description…';
+        return 'Describe imaging findings or clinical description…';
     }
   };
 
@@ -170,7 +182,7 @@ export function Chatbox() {
               {/* Task Selection - Mutually Exclusive */}
               <div className="px-2 py-2">
                 <div className="flex flex-col gap-1">
-                  {(['Auto', 'Refine draft report', 'Differential diagnostic'] as TaskType[]).map((option) => (
+                  {(['Auto', 'Tumor', 'Arthritis', 'Trauma', 'Infection', 'AVN', 'Inflammatory', 'Developmental', 'Vascular'] as TaskType[]).map((option) => (
                     <button
                       key={option}
                       onClick={() => setTask(option)}

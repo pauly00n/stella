@@ -6,7 +6,6 @@ import {
   generateReport,
   generateImagesForDraft,
   selectTaskForAutoMode,
-  type ImageResult,
 } from '@/lib/services/generate-service';
 import {
   GenerateForChatBodySchema,
@@ -23,12 +22,9 @@ function mapUiModeToInternalTask(
   mode: TaskType,
   autoTask: InternalTask | null
 ): InternalTask {
-  if (mode === 'Auto') {
-    return autoTask ?? 'none';
-  }
-  if (mode === 'Refine draft report') return 'refine';
-  if (mode === 'Differential diagnostic') return 'diagnostic';
-  return 'none';
+  if (mode === 'Auto') return autoTask ?? 'none';
+  // All specific differential categories map to 'diagnostic'
+  return 'diagnostic';
 }
 
 export async function POST(request: NextRequest) {
@@ -42,7 +38,6 @@ export async function POST(request: NextRequest) {
   });
 
   try {
-    // Safely parse JSON body – handle empty / invalid payloads gracefully
     let jsonBody: unknown;
     try {
       jsonBody = await request.json();
@@ -52,6 +47,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
     const parsedBody = GenerateForChatBodySchema.safeParse(jsonBody);
     if (!parsedBody.success) {
       return NextResponse.json(
@@ -59,6 +55,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
     const body: GenerateForChatBody = parsedBody.data;
     const {
       chatId,
@@ -130,13 +127,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Image-only operation: generate images for an existing assistant message
+    // Image-only operation: generate grouped images for an existing assistant message
     if (operation === 'images') {
       if (!showImages) {
-        return NextResponse.json({ ok: true, imagesCount: 0, latencyMs: 0 });
+        return NextResponse.json({ ok: true, groupCount: 0, latencyMs: 0 });
       }
 
-      // Prefer provided draft; if missing/empty, fall back to latest user message content
       let effectiveDraft = (draft || '').trim();
       if (!effectiveDraft) {
         const { data: userMessages, error: userMsgError } = await supabase
@@ -171,7 +167,7 @@ export async function POST(request: NextRequest) {
       }
 
       const imageStart = Date.now();
-      const { images: generatedImages, imageQuery } = await generateImagesForDraft(trimmedDraft);
+      const { groups } = await generateImagesForDraft(trimmedDraft);
       const imageLatency = Date.now() - imageStart;
 
       // Find target assistant message to update
@@ -210,10 +206,9 @@ export async function POST(request: NextRequest) {
 
       const newMeta = {
         ...previousMeta,
-        images: generatedImages,
+        images: groups,
         latencyMs: previousLatency + imageLatency,
         showImages: true,
-        imageQuery,
       };
 
       const { error: updateError } = await supabase
@@ -236,7 +231,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         ok: true,
-        imagesCount: generatedImages.length,
+        groupCount: groups.length,
         latencyMs: imageLatency,
       });
     }
@@ -249,8 +244,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Idempotency guard for response generation: if this request key already created
-    // an assistant message, return it instead of generating again.
+    // Idempotency guard
     if (idempotencyKey) {
       const { data: existingMessages, error: existingError } = await supabase
         .from('messages')
@@ -274,12 +268,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           ok: true,
           task: parsedMeta.success ? parsedMeta.data.task ?? null : null,
-          latencyMs: parsedMeta.success && typeof parsedMeta.data.latencyMs === 'number'
-            ? parsedMeta.data.latencyMs
-            : 0,
-          imagesCount:
-            parsedMeta.success && Array.isArray(parsedMeta.data.images)
-              ? parsedMeta.data.images.length
+          latencyMs:
+            parsedMeta.success && typeof parsedMeta.data.latencyMs === 'number'
+              ? parsedMeta.data.latencyMs
               : 0,
           messageId: existing.message_id,
           idempotent: true,
@@ -289,22 +280,15 @@ export async function POST(request: NextRequest) {
 
     const start = Date.now();
 
-    // Determine task first (needed for placeholder status)
+    // Determine task (Auto mode asks Gemini; specific modes always = 'diagnostic')
     let autoTask: InternalTask | null = null;
     if (mode === 'Auto') {
       autoTask = await selectTaskForAutoMode(draft);
     }
     const task: InternalTask = mapUiModeToInternalTask(mode, autoTask);
 
-    // Insert placeholder message early for status tracking (for both Auto and non-Auto modes)
-    let placeholderMessageId: string | null = null;
-    let initialStatus: string;
-    if (mode === 'Auto') {
-      initialStatus = 'analyzing_task';
-    } else {
-      // For non-Auto mode, we know the task immediately
-      initialStatus = task === 'refine' ? 'refining' : task === 'diagnostic' ? 'generating' : 'complete';
-    }
+    // Insert placeholder message for status tracking
+    const initialStatus = mode === 'Auto' ? 'analyzing_task' : 'generating';
 
     const { data: placeholderData, error: placeholderError } = await supabase
       .from('messages')
@@ -325,24 +309,23 @@ export async function POST(request: NextRequest) {
       .select('message_id')
       .single();
 
+    let placeholderMessageId: string | null = null;
     if (placeholderError) {
       logger.error('generate.response.placeholder_insert_failed', placeholderError, {
         chatId,
         userId: user.id,
         task,
       });
-      // Continue anyway - we'll insert at the end
     } else {
       placeholderMessageId = placeholderData.message_id;
-      
-      // For Auto mode, update placeholder with determined task status
+
+      // For Auto mode, update placeholder with resolved task
       if (mode === 'Auto' && autoTask) {
-        const taskStatus = autoTask === 'refine' ? 'refining' : autoTask === 'diagnostic' ? 'generating' : 'complete';
         await supabase
           .from('messages')
           .update({
             meta: {
-              status: taskStatus,
+              status: 'generating',
               images: [],
               task: autoTask,
               latencyMs: Date.now() - start,
@@ -356,13 +339,11 @@ export async function POST(request: NextRequest) {
     }
 
     let resultText: string;
-    let images: ImageResult[] = [];
 
     if (task === 'none') {
       resultText =
-        'The prompt does not appear to be a draft report or a clinical / imaging description.';
-      
-      // Update placeholder if it exists
+        'The description does not appear to be a radiology or clinical imaging finding. Please describe imaging features, mass characteristics, or clinical findings.';
+
       if (placeholderMessageId) {
         await supabase
           .from('messages')
@@ -381,15 +362,12 @@ export async function POST(request: NextRequest) {
           .eq('user_id', user.id);
       }
     } else {
-      // Text-only generation
       const gen = await generateReport({
         draft,
-        mode: task === 'refine' ? 'report' : 'diagnostic',
-        includeImages: false,
+        differentialBias: mode,
       });
 
       if (!gen.ok || !gen.result) {
-        // Clean up placeholder if generation failed
         if (placeholderMessageId) {
           await supabase
             .from('messages')
@@ -404,22 +382,21 @@ export async function POST(request: NextRequest) {
       }
 
       resultText = gen.result;
-      images = [];
     }
 
     const textLatencyMs = Date.now() - start;
 
-    // Update existing placeholder or insert new message
-    let insertedMessages: Array<{ message_id: string }> | null = null;
+    // Update placeholder or insert new message
+    let insertedMessageId: string | null = null;
+
     if (placeholderMessageId) {
-      // Update the placeholder with final content
       const { data: updatedData, error: updateError } = await supabase
         .from('messages')
         .update({
           content: resultText,
           meta: {
             status: 'complete',
-            images,
+            images: [],
             task,
             latencyMs: textLatencyMs,
             showImages,
@@ -428,7 +405,7 @@ export async function POST(request: NextRequest) {
         })
         .eq('message_id', placeholderMessageId)
         .eq('user_id', user.id)
-        .select('*')
+        .select('message_id')
         .single();
 
       if (updateError) {
@@ -442,10 +419,8 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
-      insertedMessages = [{ message_id: updatedData.message_id }];
+      insertedMessageId = updatedData.message_id;
     } else {
-      // Insert new message (non-Auto mode or placeholder insert failed)
-      // For non-Auto mode, generation is already complete, so set status to 'complete'
       const { data: newMessages, error: insertError } = await supabase
         .from('messages')
         .insert({
@@ -455,16 +430,15 @@ export async function POST(request: NextRequest) {
           content: resultText,
           meta: {
             status: 'complete',
-            images,
+            images: [],
             task,
             latencyMs: textLatencyMs,
             showImages,
             ...(idempotencyKey ? { idempotencyKey } : {}),
           },
         })
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .select('message_id')
+        .single();
 
       if (insertError) {
         logger.error('generate.response.insert_failed', insertError, {
@@ -477,12 +451,10 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
-      insertedMessages = (newMessages || []).map((message) => ({
-        message_id: message.message_id,
-      }));
+      insertedMessageId = newMessages.message_id;
     }
 
-    // Optionally update chat updated_at
+    // Update chat updated_at
     await supabase
       .from('chats')
       .update({ updated_at: new Date().toISOString() })
@@ -493,16 +465,14 @@ export async function POST(request: NextRequest) {
       ok: true,
       task,
       latencyMs: textLatencyMs,
-      imagesCount: images.length,
-      messageId: insertedMessages?.[0]?.message_id ?? null,
+      messageId: insertedMessageId,
     });
   } catch (err) {
     logger.error('generate.unhandled_error', err);
     return NextResponse.json(
       {
         ok: false,
-        error:
-          err instanceof Error ? err.message : 'Unexpected error in generation route',
+        error: err instanceof Error ? err.message : 'Unexpected error in generation route',
       },
       { status: 500 }
     );

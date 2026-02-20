@@ -10,8 +10,14 @@ import { createRequestLogger } from "@/lib/observability/logger";
 function mapTaskToDefaultTask(task: TaskType): DefaultTask {
   const taskMap: Record<TaskType, DefaultTask> = {
     Auto: "auto",
-    "Refine draft report": "refine",
-    "Differential diagnostic": "diagnostic",
+    Tumor: "tumor",
+    Arthritis: "arthritis",
+    Trauma: "trauma",
+    Infection: "infection",
+    AVN: "avn",
+    Inflammatory: "inflammatory",
+    Developmental: "developmental",
+    Vascular: "vascular",
   };
   return taskMap[task];
 }

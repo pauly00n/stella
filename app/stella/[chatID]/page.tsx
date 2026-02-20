@@ -139,9 +139,8 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                     {thinkingPhase && (
                       <div className="mb-3">
                       <span className="text-muted-foreground text-sm animate-pulse">
-                        {thinkingPhase === 'analyzing' && 'Analyzing required task...'}
-                        {thinkingPhase === 'generating' && 'Generating analysis...'}
-                        {thinkingPhase === 'refining' && 'Refining draft...'}
+                        {thinkingPhase === 'analyzing' && 'Analyzing description...'}
+                        {thinkingPhase === 'generating' && 'Generating differential diagnosis...'}
                       </span>
                       </div>
                     )}
@@ -173,43 +172,48 @@ function ChatPageContent({ chatID }: { chatID: string }) {
         >
           {shouldShowPendingAssistant || shouldShowSearchingImages ? (
             <div className="flex flex-col gap-4 h-full">
-              {/* 3 box skeletons for images - each takes ~1/3 of available height */}
+              {/* 3 group skeletons */}
               <Skeleton className="flex-1 w-full rounded" />
               <Skeleton className="flex-1 w-full rounded" />
               <Skeleton className="flex-1 w-full rounded" />
             </div>
           ) : assistantImages.length > 0 ? (
-            <div className="flex flex-col gap-4">
-              {assistantImages.map((img, idx: number) => {
-                // Prefer full image link for clarity; fall back to thumbnail if needed.
-                const thumb = img.link || img.image?.thumbnailLink || img.thumbnailLink;
-                // Prefer the source page (contextLink) over the direct image URL
-                const href = img.image?.contextLink || img.contextLink || img.link || '#';
-                const title = img.title || img.snippet || 'Related image';
-                return (
-                  <a
-                    key={idx}
-                    href={href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block rounded-md border border-border overflow-hidden bg-background hover:bg-accent transition-colors"
-                  >
-                    {thumb && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={thumb}
-                        alt={title}
-                        className="w-full h-full object-contain bg-black/5"
-                      />
-                    )}
-                    <div className="p-2">
-                      <div className="text-xs font-medium leading-snug">
-                        {title}
-                      </div>
-                    </div>
-                  </a>
-                );
-              })}
+            <div className="flex flex-col gap-6">
+              {assistantImages.map((group, groupIdx) => (
+                <div key={groupIdx}>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pb-1.5 border-b border-border mb-3">
+                    Results for {group.differentialName}
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {group.images.map((img, imgIdx) => {
+                      const thumb = img.link || img.image?.thumbnailLink || img.thumbnailLink;
+                      const href = img.image?.contextLink || img.contextLink || img.link || '#';
+                      const title = img.title || img.snippet || 'Related image';
+                      return (
+                        <a
+                          key={imgIdx}
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block rounded-md border border-border overflow-hidden bg-background hover:bg-accent transition-colors"
+                        >
+                          {thumb && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={thumb}
+                              alt={title}
+                              className="w-full h-full object-contain bg-black/5"
+                            />
+                          )}
+                          <div className="p-2">
+                            <div className="text-xs font-medium leading-snug">{title}</div>
+                          </div>
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="text-center text-muted-foreground mt-8">

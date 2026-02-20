@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { getChatById, type Chat, type Message } from "@/lib/services/chat-service";
-import { MessageMetaSchema, type MessageMeta } from "@/lib/schemas/chat";
+import { MessageMetaSchema, type MessageMeta, type DifferentialGroup, type ImageMeta } from "@/lib/schemas/chat";
 
-type ThinkingPhase = "analyzing" | "generating" | "refining" | "searching" | null;
+type ThinkingPhase = "analyzing" | "generating" | "searching" | null;
 
 function getMessageMeta(meta: unknown): MessageMeta {
   const parsed = MessageMetaSchema.safeParse(meta);
@@ -39,12 +39,24 @@ export function useChatOrchestration({
       });
   }, [chatID]);
 
-  const assistantImages = useMemo(() => {
+  // Returns grouped image results from the latest assistant message.
+  // Normalizes both old flat ImageResult[] and new DifferentialGroup[] formats.
+  const assistantImages = useMemo((): DifferentialGroup[] => {
     const assistants = messages.filter((m) => m.role !== "user");
     if (assistants.length === 0) return [];
     const last = assistants[assistants.length - 1];
     const meta = getMessageMeta(last.meta);
-    return meta.images ?? [];
+    const images = meta.images ?? [];
+    if (images.length === 0) return [];
+
+    // New format: first item has a 'differentialName' key
+    const first = images[0] as Record<string, unknown>;
+    if (first && typeof first === "object" && "differentialName" in first) {
+      return images as DifferentialGroup[];
+    }
+
+    // Legacy flat format: wrap in a single unlabeled group
+    return [{ differentialName: "Images", searchQuery: "", images: images as ImageMeta[] }];
   }, [messages]);
 
   const latestAssistantMessage = useMemo(() => {
@@ -67,8 +79,7 @@ export function useChatOrchestration({
       if (assistantMessages.length > 0) {
         return assistantMessages.some((m) => {
           const meta = getMessageMeta(m.meta);
-          const status = meta.status;
-          return status && status !== "complete";
+          return meta.status && meta.status !== "complete";
         });
       }
       return true;
@@ -80,8 +91,7 @@ export function useChatOrchestration({
 
     return assistantMessages.some((m) => {
       const meta = getMessageMeta(m.meta);
-      const status = meta.status;
-      return status && status !== "complete";
+      return meta.status && meta.status !== "complete";
     });
   }, [messages, chat]);
 
@@ -106,16 +116,10 @@ export function useChatOrchestration({
 
       if (status === "analyzing_task") {
         setThinkingPhase("analyzing");
-      } else if (status === "refining") {
-        setThinkingPhase("refining");
       } else if (status === "generating") {
         setThinkingPhase("generating");
       } else if (status === "complete") {
         setThinkingPhase(null);
-      } else if (meta.task === "refine") {
-        setThinkingPhase("refining");
-      } else if (meta.task === "diagnostic" || meta.task === "none") {
-        setThinkingPhase("generating");
       } else {
         setThinkingPhase(null);
       }
@@ -130,9 +134,7 @@ export function useChatOrchestration({
     if (!chat) return;
     if (chat.default_task === "auto") {
       setThinkingPhase("analyzing");
-    } else if (chat.default_task === "refine") {
-      setThinkingPhase("refining");
-    } else if (chat.default_task === "diagnostic") {
+    } else {
       setThinkingPhase("generating");
     }
   }, [shouldShowPendingAssistant, chat, latestAssistantMessage, shouldShowSearchingImages]);
@@ -162,9 +164,7 @@ export function useChatOrchestration({
 
     fetch("/stella/generate", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         operation: "images",
         chatId: chatID,
@@ -204,4 +204,3 @@ export function useChatOrchestration({
     getMessageMeta,
   };
 }
-

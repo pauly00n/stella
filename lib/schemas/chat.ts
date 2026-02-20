@@ -2,12 +2,29 @@ import { z } from "zod";
 
 export const TaskTypeSchema = z.enum([
   "Auto",
-  "Refine draft report",
-  "Differential diagnostic",
+  "Tumor",
+  "Arthritis",
+  "Trauma",
+  "Infection",
+  "AVN",
+  "Inflammatory",
+  "Developmental",
+  "Vascular",
 ]);
 
-export const DefaultTaskSchema = z.enum(["auto", "refine", "diagnostic"]);
-export const InternalTaskSchema = z.enum(["refine", "diagnostic", "none"]);
+export const DefaultTaskSchema = z.enum([
+  "auto",
+  "tumor",
+  "arthritis",
+  "trauma",
+  "infection",
+  "avn",
+  "inflammatory",
+  "developmental",
+  "vascular",
+]);
+
+export const InternalTaskSchema = z.enum(["diagnostic", "none"]);
 
 export const ImageMetaSchema = z
   .object({
@@ -28,12 +45,20 @@ export const ImageMetaSchema = z
   })
   .passthrough();
 
+export const DifferentialGroupSchema = z.object({
+  differentialName: z.string(),
+  searchQuery: z.string(),
+  images: z.array(ImageMetaSchema),
+});
+
 export const MessageMetaSchema = z
   .object({
     status: z
-      .enum(["analyzing_task", "refining", "generating", "complete"])
+      .enum(["analyzing_task", "generating", "complete"])
       .optional(),
-    images: z.array(ImageMetaSchema).optional(),
+    // Accept any array — could be legacy flat ImageResult[] or new DifferentialGroup[].
+    // The hook normalizes the format at read time.
+    images: z.array(z.unknown()).optional(),
     task: InternalTaskSchema.nullable().optional(),
     latencyMs: z.number().optional(),
     showImages: z.boolean().optional(),
@@ -66,6 +91,8 @@ export const GenerateForChatBodySchema = z.object({
 export type TaskType = z.infer<typeof TaskTypeSchema>;
 export type DefaultTask = z.infer<typeof DefaultTaskSchema>;
 export type InternalTask = z.infer<typeof InternalTaskSchema>;
+export type ImageMeta = z.infer<typeof ImageMetaSchema>;
+export type DifferentialGroup = z.infer<typeof DifferentialGroupSchema>;
 export type MessageMeta = z.infer<typeof MessageMetaSchema>;
 export type CreateChatBody = z.infer<typeof CreateChatBodySchema>;
 export type UpdateChatTitleBody = z.infer<typeof UpdateChatTitleBodySchema>;
