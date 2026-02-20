@@ -58,6 +58,7 @@ export default function StellaSidebar({
   const [editingTitle, setEditingTitle] = useState<string>('');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
+  const [sidebarError, setSidebarError] = useState<string | null>(null);
   const editingInputRef = useRef<HTMLInputElement>(null);
   const editingStartedAtRef = useRef<number>(0);
   const editingOriginalTitleRef = useRef<string>('');
@@ -126,7 +127,7 @@ export default function StellaSidebar({
 
 
   // Fetch user's chats
-  const { chats, loading: chatsLoading, refetch: refetchChats } = useChats();
+  const { chats, loading: chatsLoading, error: chatsError, refetch: refetchChats } = useChats();
 
   return (
     <div
@@ -231,6 +232,11 @@ export default function StellaSidebar({
         >
           Recent chats
         </h3>
+        {isSidebarExpanded && (sidebarError || chatsError) && (
+          <div className="px-4 pb-1 text-xs text-red-500 truncate">
+            {sidebarError || chatsError}
+          </div>
+        )}
         <div 
           className="flex-1 overflow-y-auto p-2 min-h-0 stella-scrollbar"
           {...scrollbarProps}
@@ -330,11 +336,16 @@ export default function StellaSidebar({
 
                             try {
                               await updateChatTitle(chat.chat_id, nextTitle);
+                              setSidebarError(null);
                               setEditingChatId(null);
                               setEditingTitle('');
                               await refetchChats();
                             } catch (error) {
-                              console.error('Failed to update chat title:', error);
+                              setSidebarError(
+                                error instanceof Error
+                                  ? error.message
+                                  : 'Failed to update chat title'
+                              );
                               setEditingChatId(null);
                               setEditingTitle('');
                             }
@@ -522,6 +533,7 @@ export default function StellaSidebar({
                 if (!deletingChatId) return;
                 try {
                   await deleteChat(deletingChatId);
+                  setSidebarError(null);
                   await refetchChats();
                   // If the deleted chat was the active one, redirect to /stella
                   if (currentChatID === deletingChatId) {
@@ -530,7 +542,11 @@ export default function StellaSidebar({
                   setShowDeleteDialog(false);
                   setDeletingChatId(null);
                 } catch (error) {
-                  console.error('Failed to delete chat:', error);
+                  setSidebarError(
+                    error instanceof Error
+                      ? error.message
+                      : 'Failed to delete chat'
+                  );
                   setShowDeleteDialog(false);
                   setDeletingChatId(null);
                 }
@@ -545,4 +561,3 @@ export default function StellaSidebar({
     </div>
   );
 }
-

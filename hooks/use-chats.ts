@@ -31,7 +31,6 @@ export function useChats(): UseChatsResult {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
       setError(errorMessage);
-      console.error('Error fetching chats:', err);
     } finally {
       setLoading(false);
     }
@@ -48,4 +47,3 @@ export function useChats(): UseChatsResult {
     refetch: fetchChats,
   };
 }
-

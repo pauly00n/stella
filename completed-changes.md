@@ -229,3 +229,64 @@ Final state at time of this summary: all three commands pass.
     - `X-RateLimit-Remaining`
     - `X-RateLimit-Reset`
   - Emits structured `generate.rate_limited` warning event.
+
+## 12. Config and Secret Hygiene Hardening
+
+### Startup env validation and server-only secret boundary
+- Added startup validation for required server environment variables (including generation and security settings).
+- Why:
+  - Fail fast at boot instead of failing at runtime under live traffic.
+  - Prevent accidental deploys with missing or malformed env values.
+- How:
+  - Centralized env parsing in server env module using schema validation.
+  - Explicitly separated server-only variables from public client env usage.
+  - Updated code paths to import typed server env object rather than reading raw `process.env` ad hoc.
+
+## 13. Chat Page Orchestration Refactor + User-Visible Error Handling
+
+### New orchestration hook
+- Added `hooks/use-chat-orchestration.ts`.
+- Why:
+  - `app/stella/[chatID]/page.tsx` had fragmented orchestration state and effects, which made behavior hard to reason about and explain.
+  - Consolidation improves maintainability and line-by-line explainability.
+- How:
+  - Moved chat metadata fetch, pending assistant detection, thinking phase derivation, image generation trigger, and hybrid polling decisions into one hook.
+  - Hook now returns typed orchestration outputs consumed by the page.
+
+### Chat page simplification
+- Updated `app/stella/[chatID]/page.tsx` to consume `useChatOrchestration`.
+- Why:
+  - Keep page component presentational and focused on rendering.
+- How:
+  - Removed in-page orchestration effects/memos and replaced them with hook return values.
+  - Added combined error rendering for message-fetch + orchestration failures.
+
+### Removed UI debug logs and surfaced errors to users
+- Updated `components/chatbox.tsx`:
+  - Removed debug `console.log`/`console.error`.
+  - Added inline error state rendering.
+  - Changed generate call from silent fire-and-forget to awaited response with user-facing error handling and auth redirect on 401.
+- Updated `components/sign-up-form.tsx`:
+  - Removed debug sign-up logs.
+- Updated `components/stella-sidebar.tsx`:
+  - Added visible `sidebarError` message area.
+  - Rename/delete failures now display user-visible errors instead of hidden console errors.
+- Updated `hooks/use-chats.ts` and `hooks/use-messages.ts`:
+  - Removed console error logging in favor of existing exposed hook `error` state that UI can render.
+- Why:
+  - User-facing failures should be visible and actionable.
+  - Debug logs in client flows leak noise and hide failures from users.
+- How:
+  - Introduced/used local error state and rendered it in the relevant components.
+  - Removed non-essential console logging in UI/hook flows.
+
+## 14. Structured Logging Migration in Generation Service
+
+- Updated `lib/services/generate-service.ts` to replace remaining server-side `console.*` calls with structured logger events.
+- Why:
+  - Standardized machine-parsable logs for operations, alerting, and debugging.
+  - Consistent log schema across routes/services.
+- How:
+  - Imported request logger factory and created service logger context.
+  - Replaced parse/search/report error logs with stable event names and structured context.
+  - Added safe response preview/length fields for task-selection parse failures instead of dumping full raw content.

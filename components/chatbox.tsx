@@ -18,6 +18,7 @@ import { createChatWithMessage, type TaskType } from '@/lib/services/chat-servic
 
 export function Chatbox() {
   const [message, setMessage] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const MAX_HEIGHT = 300; // Maximum height in pixels before scrolling
@@ -33,23 +34,24 @@ export function Chatbox() {
   const handleSend = async () => {
     if (message.trim() && !isSending) {
       setIsSending(true);
+      setError(null);
       try {
         const trimmed = message.trim();
         const { chat } = await createChatWithMessage(trimmed, task);
-        console.log('Chat and message created successfully');
+
         setMessage('');
-        // Reset textarea height after sending
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
           textareaRef.current.style.height = `${MIN_HEIGHT}px`;
         }
-        // Fire-and-forget background generation for assistant response (text only).
-        // Images, if requested, will be generated later from the chat page.
+
+        // Redirect immediately — chat page polls for the response
+        window.location.href = `/stella/${chat.chat_id}`;
+
+        // Fire generate in background (don't await — chat page polls for updates)
         fetch('/stella/generate', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             operation: 'response',
             chatId: chat.chat_id,
@@ -58,20 +60,16 @@ export function Chatbox() {
             showImages: showImages === 'On',
             idempotencyKey: crypto.randomUUID(),
           }),
-        }).catch((err) => {
-          console.error('Error triggering generation:', err);
+        }).catch(() => {
+          // Error will surface via chat page polling
         });
-
-        // Redirect to the chat page using full page navigation to avoid SSR issues
-        window.location.href = `/stella/${chat.chat_id}`;
       } catch (error) {
-        console.error('Error sending message:', error);
         if (error instanceof Error && error.message === 'User not authenticated') {
           // If there is no auth session, send the user to login.
           router.push('/stella/login');
           return;
         }
-        // TODO: Show error message to user
+        setError(error instanceof Error ? error.message : 'Failed to send message. Please try again.');
       } finally {
         setIsSending(false);
       }
@@ -145,7 +143,10 @@ export function Chatbox() {
             ref={textareaRef}
             placeholder={getPlaceholder()}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => {
+              setMessage(e.target.value);
+              if (error) setError(null);
+            }}
             onKeyDown={handleKeyDown}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
@@ -220,8 +221,8 @@ export function Chatbox() {
             <ArrowRight className="h-5 w-5" />
           </Button>
         </div>
+        {error && <p className="px-2 pb-2 text-sm text-red-500">{error}</p>}
       </CardContent>
     </Card>
   );
 }
-

@@ -50,7 +50,6 @@ export function useMessages(chatID: string | undefined): UseMessagesResult {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
       setError(errorMessage);
-      console.error('Error fetching messages:', err);
     } finally {
       // Only end the "initial load" spinner state; silent refreshes should not toggle it.
       if (!(options?.silent ?? hasLoadedOnceRef.current)) setLoading(false);

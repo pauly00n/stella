@@ -3,12 +3,14 @@
  * Implements the report generation logic using Gemini AI and Google Custom Search
  */
 import { serverEnv } from '@/lib/env/server';
+import { createRequestLogger } from '@/lib/observability/logger';
 
 const GEMINI_API_KEY = serverEnv.GEMINI_API_KEY;
 const SEARCH_API_KEY = serverEnv.SEARCH_API_KEY || '';
 const CX = serverEnv.SEARCH_CX || '';
 const PROVIDER_TIMEOUT_MS = 30000;
 const PROVIDER_MAX_RETRIES = 2;
+const logger = createRequestLogger({ route: 'lib/services/generate-service' });
 
 // Keywords for classification
 const KEYWORDS: Record<string, string[]> = {
@@ -475,7 +477,10 @@ export async function selectTaskForAutoMode(
       return task;
     }
   } catch (err) {
-    console.error('Error parsing task selection response:', err, cleaned);
+    logger.error('generate.task_selection.parse_failed', err, {
+      responsePreview: cleaned.slice(0, 200),
+      responseLength: cleaned.length,
+    });
   }
 
   // Fallback if parsing fails.
@@ -540,7 +545,7 @@ async function callGemini(promptText: string): Promise<string> {
  */
 async function searchImages(query: string): Promise<ImageResult[]> {
   if (!SEARCH_API_KEY || !CX) {
-    console.warn('Search API keys not configured, skipping image search');
+    logger.warn('generate.images.search_config_missing');
     return [];
   }
 
@@ -562,7 +567,10 @@ async function searchImages(query: string): Promise<ImageResult[]> {
 
     if (!response.ok) {
       const errorData = await response.text();
-      console.error(`Image search error: ${response.status} - ${errorData}`);
+      logger.error('generate.images.search_failed', undefined, {
+        status: response.status,
+        errorData,
+      });
       return [];
     }
 
@@ -588,7 +596,7 @@ async function searchImages(query: string): Promise<ImageResult[]> {
 
     return images;
   } catch (error) {
-    console.error(`Image search error: ${error}`);
+    logger.error('generate.images.search_failed', error);
     return [];
   }
 }
@@ -628,7 +636,7 @@ export async function generateImagesForDraft(draft: string): Promise<ImageGenera
       images = await searchImages(searchQuery);
     }
   } catch (error) {
-    console.error('Error with keyword extraction or image search:', error);
+    logger.error('generate.images.keyword_or_search_failed', error);
     // Continue even if image search fails
   }
 
@@ -675,7 +683,10 @@ export async function generateReport(request: GenerateRequest): Promise<Generate
       imageQuery,
     };
   } catch (error) {
-    console.error('Error in generateReport:', error);
+    logger.error('generate.report_failed', error, {
+      mode: request.mode ?? 'report',
+      includeImages: request.includeImages ?? true,
+    });
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'An unexpected error occurred',

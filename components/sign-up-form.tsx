@@ -60,14 +60,8 @@ export function SignUpForm({
           emailRedirectTo: `${window.location.origin}${AUTH_ROUTES.home}`,
         },
       });
-      
-      // Log response for debugging
-      console.log('Sign up response:', { data, error });
-      
+
       if (error) {
-        // Log error for debugging
-        console.log('Sign up error:', error);
-        
         // Check if the error is about user already existing
         const errorMessage = (error.message || '').toLowerCase();
         const errorCode = getErrorCode(error) ?? '';
