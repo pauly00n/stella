@@ -1,0 +1,40 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+
+async function getAuthenticatedUser() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    return { supabase, user: null as null };
+  }
+  return { supabase, user };
+}
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ chatID: string }> },
+) {
+  const { chatID } = await params;
+  const { supabase, user } = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
+  }
+
+  const { data, error } = await supabase
+    .from("messages")
+    .select("*")
+    .eq("chat_id", chatID)
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching messages:", error);
+    return NextResponse.json({ ok: false, error: "Failed to load messages" }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true, messages: data ?? [] });
+}

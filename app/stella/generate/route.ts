@@ -8,25 +8,13 @@ import {
   selectTaskForAutoMode,
   type ImageResult,
 } from '@/lib/services/generate-service';
-import type { TaskType } from '@/lib/services/chat-service';
-
-type InternalTask = 'refine' | 'diagnostic' | 'none';
-
-interface GenerateForChatBody {
-  // Common
-  chatId: string;
-  // Operation: 'response' (default) = generate text; 'images' = generate images for an existing response
-  operation?: 'response' | 'images';
-
-  // For 'response'
-  draft?: string;
-  mode?: TaskType; // UI mode: 'Auto' | 'Refine draft report' | 'Differential diagnostic'
-  showImages?: boolean;
-
-  // For 'images'
-  // Optional explicit message to update; if omitted, latest assistant message in the chat is used
-  messageId?: string;
-}
+import {
+  GenerateForChatBodySchema,
+  MessageMetaSchema,
+  type GenerateForChatBody,
+  type InternalTask,
+  type TaskType,
+} from '@/lib/schemas/chat';
 
 function mapUiModeToInternalTask(
   mode: TaskType,
@@ -43,15 +31,23 @@ function mapUiModeToInternalTask(
 export async function POST(request: NextRequest) {
   try {
     // Safely parse JSON body – handle empty / invalid payloads gracefully
-    let body: GenerateForChatBody;
+    let jsonBody: unknown;
     try {
-      body = (await request.json()) as GenerateForChatBody;
+      jsonBody = await request.json();
     } catch {
       return NextResponse.json(
         { ok: false, error: 'Invalid or empty JSON body' },
         { status: 400 }
       );
     }
+    const parsedBody = GenerateForChatBodySchema.safeParse(jsonBody);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { ok: false, error: 'Invalid request payload' },
+        { status: 400 }
+      );
+    }
+    const body: GenerateForChatBody = parsedBody.data;
     const {
       chatId,
       draft,
@@ -107,7 +103,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        effectiveDraft = (userMessages[0] as any).content || '';
+        effectiveDraft = userMessages[0]?.content ?? '';
       }
 
       const trimmedDraft = effectiveDraft.trim();
@@ -146,8 +142,9 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const target: any = messages[0];
-      const previousMeta = target.meta || {};
+      const target = messages[0];
+      const parsedMeta = MessageMetaSchema.safeParse(target.meta);
+      const previousMeta = parsedMeta.success ? parsedMeta.data : {};
       const previousLatency =
         typeof previousMeta.latencyMs === 'number' ? previousMeta.latencyMs : 0;
 
@@ -304,7 +301,7 @@ export async function POST(request: NextRequest) {
     const textLatencyMs = Date.now() - start;
 
     // Update existing placeholder or insert new message
-    let insertedMessages: any[] | null = null;
+    let insertedMessages: Array<{ message_id: string }> | null = null;
     if (placeholderMessageId) {
       // Update the placeholder with final content
       const { data: updatedData, error: updateError } = await supabase
@@ -331,7 +328,7 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
-      insertedMessages = [updatedData];
+      insertedMessages = [{ message_id: updatedData.message_id }];
     } else {
       // Insert new message (non-Auto mode or placeholder insert failed)
       // For non-Auto mode, generation is already complete, so set status to 'complete'
@@ -361,7 +358,9 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
-      insertedMessages = newMessages;
+      insertedMessages = (newMessages || []).map((message) => ({
+        message_id: message.message_id,
+      }));
     }
 
     // Optionally update chat updated_at
@@ -390,5 +389,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-

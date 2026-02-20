@@ -1,5 +1,13 @@
 # Changes Required to Reach Industry Standards
 
+## 0. Explainability Standard (Persistent Project Rule)
+
+- Every new design choice must have a clear rationale that can be explained in plain language.
+- Every non-trivial function should have a single, explicit purpose and understandable control flow.
+- Remove dead code quickly; do not keep unused helpers/constants/routes around \"just in case\".
+- Prefer explicit naming and typed data models over clever/implicit logic.
+- If a line cannot be justified, refactor or delete it.
+
 ## 1. Dependency and Toolchain Alignment
 
 ### Immediate
@@ -10,71 +18,19 @@
   - `eslint`
   - `react`
   - `react-dom`
-- Remove deprecated Next.js config keys and ensure all scripts are Next 16 compatible.
-- Keep linting strict and deterministic in CI.
 
 ### Recommended target actions
 - Pin exact versions for framework-critical packages.
 - Use one lockfile strategy (`package-lock.json` or `pnpm-lock.yaml`) and remove the other.
 - Add engines in `package.json` (Node + npm/pnpm version policy).
 
-## 2. Build and CI Pipeline Hardening
+## 2. Type Safety and Domain Modeling
 
-### Immediate
-- Keep `lint`, `typecheck`, and `build` as separate required CI jobs.
-- Enforce `--max-warnings=0` in lint.
-- Build in a deterministic mode (current workaround: webpack build).
+### Remaining work
+- Remove residual `any` usages outside core chat/generation path (e.g., auth/profile/UI utility areas).
+- Continue converting ambiguous payloads to schema-validated types.
 
-### Add CI checks
-- `npm ci`
-- `npm run lint`
-- `npm run typecheck`
-- `npm run build`
-- Fail PRs on any check failure.
-
-## 3. Auth and Route Correctness
-
-### Fix broken route references
-- Password reset redirect points to wrong path.
-- Update-password completion redirects to a non-existent protected route.
-- OTP confirm route redirects to `/error` while error page currently exists under `/stella/error`.
-- Error page defines content helper but does not render it.
-
-### Standardize auth flow
-- Single source of truth for auth paths/constants.
-- Ensure login/signup/forgot/reset/confirm all roundtrip correctly in E2E tests.
-
-## 4. Centralized Session Enforcement
-
-### Current issue
-- Session guard logic exists (`lib/supabase/proxy.ts`) but is not wired as global middleware.
-
-### Required changes
-- Add `middleware.ts` that calls session update/protection helper.
-- Define explicit allowlist/denylist for public routes.
-- Eliminate route protection drift between client-only guards and server checks.
-
-## 5. Data Access Architecture
-
-### Current issue
-- Mixed client-direct Supabase writes and server writes increase complexity and policy drift risk.
-
-### Required changes
-- Move chat/message mutations to server-side route handlers or server actions.
-- Keep Supabase RLS as defense in depth, not as sole control plane.
-- Add request validation (Zod) for every API boundary.
-
-## 6. Type Safety and Domain Modeling
-
-### Current issue
-- Heavy `any` usage in core message metadata path.
-
-### Required changes
-- Define strict `MessageMeta` schema with Zod + TypeScript types.
-- Replace all `any` in chat/generation flow with typed interfaces.
-- Add exhaustive status/task enums and runtime schema validation at read/write points.
-
-## 7. Reliability and Async Processing
+## 3. Reliability and Async Processing
 
 ### Current issue
 - Polling-only UI sync and placeholder mutation patterns are fragile at scale.
@@ -85,7 +41,7 @@
 - Add timeout/circuit-breaker handling for Gemini/Search APIs.
 - Migrate from pure polling to push or hybrid updates (Supabase realtime/SSE).
 
-## 8. Observability and Operations
+## 4. Observability and Operations
 
 ### Required changes
 - Replace ad-hoc `console.log` with structured logging.
@@ -96,7 +52,7 @@
   - token usage/cost tracking
 - Integrate error monitoring (e.g., Sentry).
 
-## 9. Security and Abuse Controls
+## 5. Security and Abuse Controls
 
 ### Required changes
 - Add route-level rate limiting for generation endpoints.
@@ -104,7 +60,7 @@
 - Add prompt/content moderation guardrails before and after generation.
 - Sanitize/normalize all externally sourced content before rendering/storage.
 
-## 10. Medical/Clinical Safety Controls
+## 6. Medical/Clinical Safety Controls
 
 ### Required changes
 - Keep and strengthen non-clinical-use disclaimer across all generation surfaces.
@@ -112,7 +68,7 @@
 - Add policy checks for prohibited clinical directives.
 - Add human-review gates for any workflow that could be interpreted as decision support.
 
-## 11. Testing Strategy (Minimum Production Baseline)
+## 7. Testing Strategy (Minimum Production Baseline)
 
 ### Unit tests
 - Task mapping and task-selection parsing.
@@ -129,7 +85,7 @@
 - Signup disabled/enabled flows.
 - Broken-route regression tests for auth pages.
 
-## 12. Frontend Quality and UX Consistency
+## 8. Frontend Quality and UX Consistency
 
 ### Required changes
 - Consolidate loading/error states across chat pages and forms.
@@ -137,7 +93,7 @@
 - Remove debug logs from user-facing flows.
 - Add accessibility audits (keyboard nav, landmarks, labels, contrast).
 
-## 13. Config and Secrets Hygiene
+## 9. Config and Secrets Hygiene
 
 ### Required changes
 - Validate required env vars at startup.
@@ -145,26 +101,24 @@
 - Document env var contract in a tracked `.env.example`.
 - Enforce separation between public and server-only secrets.
 
-## 14. Database and Migration Discipline
+## 10. Database and Migration Discipline
 
 ### Required changes
 - Replace schema-only markdown docs with tracked SQL migrations.
 - Add index and constraint verification in migration scripts.
 - Add tests/checks for RLS policy behavior.
 
-## 15. Repository Hygiene
+## 11. Repository Hygiene
 
 ### Required changes
 - Add root `README.md` with architecture, runbook, and deployment instructions.
 - Add `CONTRIBUTING.md` with coding/testing standards.
 - Add ownership and review boundaries for critical areas (auth, generation, data).
 
-## 16. Prioritized Execution Plan
+## 12. Prioritized Execution Plan
 
 ### Phase 0 (1-3 days): Stability
-- Fix route mismatches in auth/reset/error flows.
 - Finalize dependency matrix alignment.
-- Ensure lint/typecheck/build are green in CI.
 
 ### Phase 1 (3-7 days): Safety + Correctness
 - Introduce typed `MessageMeta` + Zod validation.
@@ -178,12 +132,10 @@
 - Add provider timeout and fallback handling.
 
 ### Phase 3 (2-4 weeks): Production Maturity
-- Move remaining client-side DB mutations to server-side boundaries.
-- Add middleware-based centralized session policy.
 - Add observability dashboards and alerting thresholds.
 - Add migration-based DB lifecycle and RLS verification checks.
 
-## 17. Definition of “Industry Standard” for This Repo
+## 13. Definition of “Industry Standard” for This Repo
 
 The project is at industry-standard readiness when:
 - Dependency matrix is coherent and reproducible.

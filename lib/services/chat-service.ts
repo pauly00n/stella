@@ -1,7 +1,10 @@
-import { createClient } from '@/lib/supabase/client';
+import type {
+  DefaultTask,
+  MessageMeta,
+  TaskType,
+} from '@/lib/schemas/chat';
 
-export type TaskType = 'Auto' | 'Refine draft report' | 'Differential diagnostic';
-export type DefaultTask = 'auto' | 'refine' | 'diagnostic';
+export type { DefaultTask, TaskType };
 
 export interface Chat {
   chat_id: string;
@@ -18,35 +21,38 @@ export interface Message {
   user_id: string;
   role: string;
   content: string;
-  meta: any | null;
+  meta: MessageMeta | null;
   created_at: string;
 }
 
-/**
- * Maps UI task selection to database value
- */
-const mapTaskToDefaultTask = (task: TaskType): DefaultTask => {
-  const taskMap: Record<TaskType, DefaultTask> = {
-    'Auto': 'auto',
-    'Refine draft report': 'refine',
-    'Differential diagnostic': 'diagnostic'
-  };
-  return taskMap[task];
-};
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers || {}),
+    },
+  });
 
-/**
- * Gets the current authenticated user
- * @throws Error if user is not authenticated
- */
-async function getCurrentUser() {
-  const supabase = createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
-  
-  if (error || !user) {
-    throw new Error('User not authenticated');
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // no-op
   }
-  
-  return user;
+
+  if (!response.ok) {
+    const message =
+      typeof payload === 'object' &&
+      payload !== null &&
+      'error' in payload &&
+      typeof (payload as { error?: unknown }).error === 'string'
+        ? (payload as { error: string }).error
+        : 'Request failed';
+    throw new Error(message);
+  }
+
+  return payload as T;
 }
 
 /**
@@ -60,43 +66,15 @@ export async function createChatWithMessage(
   messageContent: string,
   task: TaskType
 ): Promise<{ chat: Chat; message: Message }> {
-  const supabase = createClient();
-  const user = await getCurrentUser();
-  const defaultTask = mapTaskToDefaultTask(task);
+  const payload = await apiRequest<{ ok: true; chat: Chat; message: Message }>(
+    '/api/stella/chats',
+    {
+      method: 'POST',
+      body: JSON.stringify({ messageContent, task }),
+    }
+  );
 
-  // Create chat
-  const { data: chatData, error: chatError } = await supabase
-    .from('chats')
-    .insert({
-      user_id: user.id,
-      default_task: defaultTask,
-    })
-    .select()
-    .single();
-
-  if (chatError || !chatData) {
-    console.error('Error creating chat:', chatError);
-    throw new Error('Failed to create chat');
-  }
-
-  // Create message
-  const { data: messageData, error: messageError } = await supabase
-    .from('messages')
-    .insert({
-      chat_id: chatData.chat_id,
-      user_id: user.id,
-      role: 'user',
-      content: messageContent,
-    })
-    .select()
-    .single();
-
-  if (messageError || !messageData) {
-    console.error('Error creating message:', messageError);
-    throw new Error('Failed to create message');
-  }
-
-  return { chat: chatData, message: messageData };
+  return { chat: payload.chat, message: payload.message };
 }
 
 /**
@@ -106,22 +84,10 @@ export async function createChatWithMessage(
  * @throws Error if messages cannot be fetched
  */
 export async function getMessagesByChatId(chatID: string): Promise<Message[]> {
-  const supabase = createClient();
-  const user = await getCurrentUser();
-
-  const { data: messagesData, error: messagesError } = await supabase
-    .from('messages')
-    .select('*')
-    .eq('chat_id', chatID)
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: true });
-
-  if (messagesError) {
-    console.error('Error fetching messages:', messagesError);
-    throw new Error('Failed to load messages');
-  }
-
-  return messagesData || [];
+  const payload = await apiRequest<{ ok: true; messages: Message[] }>(
+    `/api/stella/chats/${encodeURIComponent(chatID)}/messages`
+  );
+  return payload.messages;
 }
 
 /**
@@ -131,22 +97,10 @@ export async function getMessagesByChatId(chatID: string): Promise<Message[]> {
  * @throws Error if chat cannot be fetched
  */
 export async function getChatById(chatID: string): Promise<Chat> {
-  const supabase = createClient();
-  const user = await getCurrentUser();
-
-  const { data: chatData, error: chatError } = await supabase
-    .from('chats')
-    .select('*')
-    .eq('chat_id', chatID)
-    .eq('user_id', user.id)
-    .single();
-
-  if (chatError || !chatData) {
-    console.error('Error fetching chat:', chatError);
-    throw new Error('Failed to load chat');
-  }
-
-  return chatData;
+  const payload = await apiRequest<{ ok: true; chat: Chat }>(
+    `/api/stella/chats/${encodeURIComponent(chatID)}`
+  );
+  return payload.chat;
 }
 
 /**
@@ -155,21 +109,8 @@ export async function getChatById(chatID: string): Promise<Chat> {
  * @throws Error if chats cannot be fetched
  */
 export async function getUserChats(): Promise<Chat[]> {
-  const supabase = createClient();
-  const user = await getCurrentUser();
-
-  const { data: chatsData, error: chatsError } = await supabase
-    .from('chats')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('updated_at', { ascending: false });
-
-  if (chatsError) {
-    console.error('Error fetching chats:', chatsError);
-    throw new Error('Failed to load chats');
-  }
-
-  return chatsData || [];
+  const payload = await apiRequest<{ ok: true; chats: Chat[] }>('/api/stella/chats');
+  return payload.chats;
 }
 
 /**
@@ -180,23 +121,14 @@ export async function getUserChats(): Promise<Chat[]> {
  * @throws Error if update fails
  */
 export async function updateChatTitle(chatID: string, newTitle: string): Promise<Chat> {
-  const supabase = createClient();
-  const user = await getCurrentUser();
-
-  const { data: chatData, error: chatError } = await supabase
-    .from('chats')
-    .update({ title: newTitle })
-    .eq('chat_id', chatID)
-    .eq('user_id', user.id)
-    .select()
-    .single();
-
-  if (chatError || !chatData) {
-    console.error('Error updating chat:', chatError);
-    throw new Error('Failed to update chat title');
-  }
-
-  return chatData;
+  const payload = await apiRequest<{ ok: true; chat: Chat }>(
+    `/api/stella/chats/${encodeURIComponent(chatID)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ title: newTitle }),
+    }
+  );
+  return payload.chat;
 }
 
 /**
@@ -205,31 +137,7 @@ export async function updateChatTitle(chatID: string, newTitle: string): Promise
  * @throws Error if deletion fails
  */
 export async function deleteChat(chatID: string): Promise<void> {
-  const supabase = createClient();
-  const user = await getCurrentUser();
-
-  // First delete all messages in the chat
-  const { error: messagesError } = await supabase
-    .from('messages')
-    .delete()
-    .eq('chat_id', chatID)
-    .eq('user_id', user.id);
-
-  if (messagesError) {
-    console.error('Error deleting messages:', messagesError);
-    throw new Error('Failed to delete chat messages');
-  }
-
-  // Then delete the chat
-  const { error: chatError } = await supabase
-    .from('chats')
-    .delete()
-    .eq('chat_id', chatID)
-    .eq('user_id', user.id);
-
-  if (chatError) {
-    console.error('Error deleting chat:', chatError);
-    throw new Error('Failed to delete chat');
-  }
+  await apiRequest<{ ok: true }>(`/api/stella/chats/${encodeURIComponent(chatID)}`, {
+    method: 'DELETE',
+  });
 }
-

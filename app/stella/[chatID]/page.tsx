@@ -9,6 +9,15 @@ import { ChatLoadingSkeleton } from '@/components/chat-loading-skeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getChatById } from '@/lib/services/chat-service';
 import type { Message, Chat, DefaultTask } from '@/lib/services/chat-service';
+import {
+  MessageMetaSchema,
+  type MessageMeta,
+} from '@/lib/schemas/chat';
+
+function getMessageMeta(meta: unknown): MessageMeta {
+  const parsed = MessageMetaSchema.safeParse(meta);
+  return parsed.success ? parsed.data : {};
+}
 
 function ChatPageContent({ chatID }: { chatID: string }) {
   const { messages, loading, error, refetch } = useMessages(chatID);
@@ -37,23 +46,24 @@ function ChatPageContent({ chatID }: { chatID: string }) {
 
   // Find images from the most recent assistant message (if any)
   const assistantImages = useMemo(() => {
-    const assistants = messages.filter((m) => m.role !== 'user' && m.meta && Array.isArray((m.meta as any).images));
-    if (assistants.length === 0) return [] as any[];
-    const last = assistants[assistants.length - 1] as Message & { meta: any };
-    return (last.meta?.images ?? []) as any[];
+    const assistants = messages.filter((m) => m.role !== 'user');
+    if (assistants.length === 0) return [];
+    const last = assistants[assistants.length - 1];
+    const meta = getMessageMeta(last.meta);
+    return meta.images ?? [];
   }, [messages]);
 
   // Get the most recent assistant message and its meta
   const latestAssistantMessage = useMemo(() => {
     const assistants = messages.filter((m) => m.role !== 'user');
     if (assistants.length === 0) return null;
-    return assistants[assistants.length - 1] as Message & { meta: any };
+    return assistants[assistants.length - 1];
   }, [messages]);
 
   // Track assistant message status/content for image generation trigger
   const assistantMessageKey = useMemo(() => {
     if (!latestAssistantMessage) return null;
-    const meta = (latestAssistantMessage.meta || {}) as any;
+    const meta = getMessageMeta(latestAssistantMessage.meta);
     return `${latestAssistantMessage.message_id}-${meta.status}-${latestAssistantMessage.content?.length || 0}`;
   }, [latestAssistantMessage]);
 
@@ -76,7 +86,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
       // If we have assistant messages, check if any are not complete
       if (assistantMessages.length > 0) {
         return assistantMessages.some((m) => {
-          const meta = (m.meta || {}) as any;
+          const meta = getMessageMeta(m.meta);
           const status = meta.status;
           return status && status !== 'complete';
         });
@@ -92,7 +102,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
 
     // If any assistant message is not complete, we are still pending.
     return assistantMessages.some((m) => {
-      const meta = (m.meta || {}) as any;
+      const meta = getMessageMeta(m.meta);
       const status = meta.status;
       return status && status !== 'complete';
     });
@@ -101,7 +111,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
   // Check if we should show "Searching images..." when text is loaded but images aren't
   const shouldShowSearchingImages = useMemo(() => {
     if (!latestAssistantMessage) return false;
-    const meta = (latestAssistantMessage.meta || {}) as any;
+    const meta = getMessageMeta(latestAssistantMessage.meta);
     const wantImages = !!meta.showImages;
     const task = meta.task;
     const hasImages = Array.isArray(meta.images) && meta.images.length > 0;
@@ -119,7 +129,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
 
     // Check if we have an assistant message with status tracking
     if (latestAssistantMessage) {
-      const meta = (latestAssistantMessage.meta || {}) as any;
+      const meta = getMessageMeta(latestAssistantMessage.meta);
       const status = meta.status;
       
       if (status === 'analyzing_task') {
@@ -171,7 +181,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
   // If images were requested but not yet attached and task is not 'none', trigger image-generation POST
   useEffect(() => {
     if (!latestAssistantMessage) return;
-    const meta = (latestAssistantMessage.meta || {}) as any;
+    const meta = getMessageMeta(latestAssistantMessage.meta);
     const wantImages = !!meta.showImages;
     const hasImagesArray = Array.isArray(meta.images) && meta.images.length > 0;
     const status = meta.status;
@@ -282,7 +292,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                         // Only render assistant message if it has content or is complete
                         // (skip placeholder messages that are still being generated)
                         (() => {
-                          const meta = (message.meta || {}) as any;
+                          const meta = getMessageMeta(message.meta);
                           const status = meta.status;
                           const hasContent = message.content && message.content.trim().length > 0;
                           const isComplete = status === 'complete';
@@ -359,7 +369,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
             </div>
           ) : assistantImages.length > 0 ? (
             <div className="flex flex-col gap-4">
-              {assistantImages.map((img: any, idx: number) => {
+              {assistantImages.map((img, idx: number) => {
                 // Prefer full image link for clarity; fall back to thumbnail if needed.
                 const thumb = img.link || img.image?.thumbnailLink || img.thumbnailLink;
                 // Prefer the source page (contextLink) over the direct image URL

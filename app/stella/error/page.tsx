@@ -1,34 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Suspense } from "react";
-
-
-async function ErrorContent({
-  searchParams,
-}: {
-  searchParams: Promise<{ error: string }>;
-}) {
-  const params = await searchParams;
-
-  return (
-    <>
-      {params?.error ? (
-        <p className="text-sm text-muted-foreground">
-          Code error: {params.error}
-        </p>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          An unspecified error occurred.
-        </p>
-      )}
-    </>
-  );
-}
 
 export default function Page({
   searchParams,
 }: {
   searchParams: Promise<{ error: string }>;
 }) {
+  const params = searchParams;
   return (
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
       <div className="w-full max-w-sm">
@@ -40,10 +17,22 @@ export default function Page({
               </CardTitle>
             </CardHeader>
             <CardContent>
+              <ErrorMessage searchParams={params} />
             </CardContent>
           </Card>
         </div>
       </div>
     </div>
   );
+}
+
+async function ErrorMessage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error: string }>;
+}) {
+  const params = await searchParams;
+  const message = params?.error || "An unspecified error occurred.";
+
+  return <p className="text-sm text-muted-foreground">Code error: {message}</p>;
 }

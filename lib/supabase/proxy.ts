@@ -1,5 +1,27 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { AUTH_ROUTES } from "@/lib/auth/routes";
+
+const PUBLIC_STELLA_ROUTES = new Set<string>([
+  AUTH_ROUTES.login,
+  AUTH_ROUTES.signUp,
+  AUTH_ROUTES.forgotPassword,
+  AUTH_ROUTES.updatePassword,
+  AUTH_ROUTES.error,
+  "/stella/sign-up-success",
+  "/stella/sign-up-exists",
+  "/stella/confirm",
+]);
+
+const AUTH_ENTRY_ROUTES = new Set<string>([
+  AUTH_ROUTES.login,
+  AUTH_ROUTES.signUp,
+  AUTH_ROUTES.forgotPassword,
+]);
+
+function isStellaPath(pathname: string): boolean {
+  return pathname === "/stella" || pathname.startsWith("/stella/");
+}
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -32,39 +54,37 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Do not run code between createServerClient and
-  // supabase.auth.getClaims(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
+  const pathname = request.nextUrl.pathname;
 
-  // IMPORTANT: If you remove getClaims() and you use server-side rendering
-  // with the Supabase client, your users may be randomly logged out.
-  const { data } = await supabase.auth.getClaims();
-  const user = data?.claims;
+  if (!isStellaPath(pathname)) {
+    return supabaseResponse;
+  }
 
-  if (
-    request.nextUrl.pathname !== "/" &&
-    !user &&
-    !request.nextUrl.pathname.startsWith("/login") &&
-    !request.nextUrl.pathname.startsWith("/auth")
-  ) {
-    // no user, potentially respond by redirecting the user to the login page
+  // Keep API auth behavior in the route handler itself (JSON 401), not middleware redirects.
+  if (pathname === "/stella/generate") {
+    return supabaseResponse;
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const isPublicRoute = PUBLIC_STELLA_ROUTES.has(pathname);
+
+  if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    url.pathname = AUTH_ROUTES.login;
+    url.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(url);
   }
 
-  // IMPORTANT: You *must* return the supabaseResponse object as it is.
-  // If you're creating a new response object with NextResponse.next() make sure to:
-  // 1. Pass the request in it, like so:
-  //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies, like so:
-  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-  // 3. Change the myNewResponse object to fit your needs, but avoid changing
-  //    the cookies!
-  // 4. Finally:
-  //    return myNewResponse
-  // If this is not done, you may be causing the browser and server to go out
-  // of sync and terminate the user's session prematurely!
+  // If already authenticated, auth entry routes should not be revisited.
+  if (user && AUTH_ENTRY_ROUTES.has(pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = AUTH_ROUTES.home;
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
 
   return supabaseResponse;
 }

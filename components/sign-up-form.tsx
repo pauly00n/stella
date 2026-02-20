@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { AUTH_ROUTES } from "@/lib/auth/routes";
 
 export function SignUpForm({
   className,
@@ -44,7 +45,7 @@ export function SignUpForm({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/stella`,
+          emailRedirectTo: `${window.location.origin}${AUTH_ROUTES.home}`,
         },
       });
       
