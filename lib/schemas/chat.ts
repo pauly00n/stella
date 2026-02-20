@@ -51,6 +51,17 @@ export const DifferentialGroupSchema = z.object({
   images: z.array(ImageMetaSchema),
 });
 
+export const PaperResultSchema = z.object({
+  title: z.string(),
+  authors: z.string(),
+  url: z.string(),
+});
+
+export const DiagnosisPaperGroupSchema = z.object({
+  diagnosisName: z.string(),
+  paper: PaperResultSchema.nullable(),
+});
+
 export const MessageMetaSchema = z
   .object({
     status: z
@@ -59,6 +70,7 @@ export const MessageMetaSchema = z
     // Accept any array — could be legacy flat ImageResult[] or new DifferentialGroup[].
     // The hook normalizes the format at read time.
     images: z.array(z.unknown()).optional(),
+    papers: z.array(DiagnosisPaperGroupSchema).optional(),
     task: InternalTaskSchema.nullable().optional(),
     latencyMs: z.number().optional(),
     showImages: z.boolean().optional(),
@@ -76,18 +88,20 @@ export const UpdateChatTitleBodySchema = z.object({
   title: z.string().trim().min(1),
 });
 
-export const GenerateOperationSchema = z.enum(["response", "images"]);
+export const GenerateOperationSchema = z.enum(["response", "images", "papers"]);
 
 export const GenerateForChatBodySchema = z.object({
   chatId: z.string().trim().min(1),
   operation: GenerateOperationSchema.optional(),
-  draft: z.string().optional(),
+  draft: z.string().max(5000).optional(),
   mode: TaskTypeSchema.optional(),
   showImages: z.boolean().optional(),
   messageId: z.string().optional(),
   idempotencyKey: z.string().trim().min(1).optional(),
 });
 
+export type PaperResult = z.infer<typeof PaperResultSchema>;
+export type DiagnosisPaperGroup = z.infer<typeof DiagnosisPaperGroupSchema>;
 export type TaskType = z.infer<typeof TaskTypeSchema>;
 export type DefaultTask = z.infer<typeof DefaultTaskSchema>;
 export type InternalTask = z.infer<typeof InternalTaskSchema>;

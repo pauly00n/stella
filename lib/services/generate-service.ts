@@ -249,10 +249,13 @@ async function callGemini(promptText: string): Promise<string> {
   }
 
   const response = await fetchWithRetry(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`,
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY,
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: promptText }] }],
       }),
@@ -358,6 +361,98 @@ export async function generateImagesForDraft(draft: string): Promise<ImageGenera
     logger.error('generate.images.keyword_or_search_failed', error);
     return { groups: [] };
   }
+}
+
+export interface PaperResult {
+  title: string;
+  authors: string;
+  url: string;
+}
+
+export interface DiagnosisPaperGroup {
+  diagnosisName: string;
+  paper: PaperResult | null;
+}
+
+export interface PaperGenerationResult {
+  groups: DiagnosisPaperGroup[];
+}
+
+/**
+ * Extracts the top 3 diagnosis names from a diagnostic markdown report.
+ * Matches patterns like: **1. Osteosarcoma** or **2. Giant Cell Tumor (GCT)**
+ */
+function extractDiagnosisNames(content: string): string[] {
+  const matches = [...content.matchAll(/\*\*\d+\.\s+([^*\n]+?)\*\*/g)];
+  return matches.slice(0, 3).map((m) => m[1].trim());
+}
+
+async function searchPaper(diagnosisName: string): Promise<PaperResult | null> {
+  const query = diagnosisName;
+  const apiUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&fields=title,authors,year,url&limit=3`;
+
+  try {
+    const response = await fetchWithRetry(
+      apiUrl,
+      { method: 'GET' },
+      { timeoutMs: 10000, retries: 1 }
+    );
+
+    if (!response.ok) {
+      logger.error('generate.papers.search_failed', undefined, {
+        diagnosisName,
+        status: response.status,
+      });
+      return null;
+    }
+
+    const data = await response.json();
+    const results: Array<{ title?: string; url?: string; paperId?: string; authors?: Array<{ name: string }>; year?: number }> = data.data ?? [];
+
+    logger.info?.('generate.papers.search_result', {
+      diagnosisName,
+      resultCount: results.length,
+      titles: results.map((r) => r.title),
+    });
+
+    const paper = results.find((p) => p.title);
+    if (!paper) return null;
+
+    // url field is sometimes absent — fall back to constructing from paperId
+    const paperUrl = paper.url || (paper.paperId ? `https://www.semanticscholar.org/paper/${paper.paperId}` : '');
+
+    const names = (paper.authors ?? []).map((a) => a.name);
+    const authorStr = names.length > 2 ? `${names[0]} et al.` : names.join(', ');
+    const authorsYear = paper.year ? `${authorStr} (${paper.year})` : authorStr;
+
+    return {
+      title: paper.title ?? '',
+      authors: authorsYear,
+      url: paperUrl,
+    };
+  } catch (error) {
+    logger.error('generate.papers.search_exception', error, { diagnosisName });
+    return null;
+  }
+}
+
+/**
+ * Searches Semantic Scholar for one paper per differential diagnosis extracted
+ * from a completed diagnostic report. Runs all 3 searches in parallel.
+ */
+export async function searchPapersForContent(content: string): Promise<PaperGenerationResult> {
+  const names = extractDiagnosisNames(content);
+  if (names.length === 0) return { groups: [] };
+
+  const groups: DiagnosisPaperGroup[] = [];
+  for (const name of names) {
+    groups.push({
+      diagnosisName: name,
+      paper: await searchPaper(name),
+    });
+  }
+
+  return { groups };
 }
 
 /**

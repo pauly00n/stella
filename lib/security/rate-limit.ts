@@ -14,6 +14,9 @@ interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
+// TODO: Replace with Upstash Redis (or Supabase RPC atomic counter) before scaling.
+// This in-process Map is wiped on every Vercel cold start, making rate limits
+// ineffective across serverless instances. It is a placeholder only.
 const localWindowCounts = new Map<string, number>();
 
 function getCurrentWindow(windowSeconds: number): number {

@@ -6,6 +6,7 @@ import {
   generateReport,
   generateImagesForDraft,
   selectTaskForAutoMode,
+  searchPapersForContent,
 } from '@/lib/services/generate-service';
 import {
   GenerateForChatBodySchema,
@@ -234,6 +235,56 @@ export async function POST(request: NextRequest) {
         groupCount: groups.length,
         latencyMs: imageLatency,
       });
+    }
+
+    // Papers operation: search Semantic Scholar for one paper per differential diagnosis
+    if (operation === 'papers') {
+      const content = (draft || '').trim();
+      if (!content) {
+        return NextResponse.json(
+          { ok: false, error: 'Missing content for paper search' },
+          { status: 400 }
+        );
+      }
+
+      const { groups } = await searchPapersForContent(content);
+
+      let query = supabase
+        .from('messages')
+        .select('*')
+        .eq('chat_id', chatId)
+        .eq('user_id', user.id)
+        .eq('role', 'assistant')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (messageId) query = query.eq('message_id', messageId);
+
+      const { data: paperMessages, error: fetchError } = await query;
+
+      if (fetchError || !paperMessages || paperMessages.length === 0) {
+        return NextResponse.json(
+          { ok: false, error: 'No assistant message found for paper attachment' },
+          { status: 404 }
+        );
+      }
+
+      const target = paperMessages[0];
+      const parsedMeta = MessageMetaSchema.safeParse(target.meta);
+      const previousMeta = parsedMeta.success ? parsedMeta.data : {};
+
+      const { error: updateError } = await supabase
+        .from('messages')
+        .update({ meta: { ...previousMeta, papers: groups } })
+        .eq('message_id', target.message_id)
+        .eq('user_id', user.id);
+
+      if (updateError) {
+        logger.error('generate.papers.update_failed', updateError, { chatId, userId: user.id });
+        return NextResponse.json({ ok: false, error: 'Failed to save papers' }, { status: 500 });
+      }
+
+      return NextResponse.json({ ok: true, groupCount: groups.length });
     }
 
     // Default: text response operation

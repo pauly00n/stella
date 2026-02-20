@@ -23,6 +23,7 @@ export function useChatOrchestration({
   const [chat, setChat] = useState<Chat | null>(null);
   const [thinkingPhase, setThinkingPhase] = useState<ThinkingPhase>(null);
   const [imagesRequestStarted, setImagesRequestStarted] = useState(false);
+  const [papersRequestStarted, setPapersRequestStarted] = useState(false);
   const [orchestrationError, setOrchestrationError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -184,6 +185,36 @@ export function useChatOrchestration({
       });
   }, [latestAssistantMessage, assistantMessageKey, chatID, imagesRequestStarted, refetch]);
 
+  // Trigger paper search once text is complete — fires for all diagnostic results regardless of showImages
+  useEffect(() => {
+    if (!latestAssistantMessage) return;
+    const meta = getMessageMeta(latestAssistantMessage.meta);
+    if (
+      (Array.isArray(meta.papers) && meta.papers.length > 0) ||
+      papersRequestStarted ||
+      !latestAssistantMessage.content?.trim() ||
+      meta.status !== "complete" ||
+      meta.task === "none"
+    ) return;
+
+    setPapersRequestStarted(true);
+
+    fetch("/stella/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "papers",
+        chatId: chatID,
+        draft: latestAssistantMessage.content,
+        messageId: latestAssistantMessage.message_id,
+      }),
+    })
+      .then(() => refetch({ silent: true }).catch(() => {}))
+      .catch(() => {
+        setPapersRequestStarted(false);
+      });
+  }, [latestAssistantMessage, assistantMessageKey, chatID, papersRequestStarted, refetch]);
+
   useEffect(() => {
     if (!shouldShowPendingAssistant && !shouldShowSearchingImages) return;
 
@@ -194,12 +225,24 @@ export function useChatOrchestration({
     return () => clearInterval(interval);
   }, [shouldShowPendingAssistant, shouldShowSearchingImages, realtimeConnected, refetch]);
 
+  const shouldShowPendingPapers = useMemo(() => {
+    if (!latestAssistantMessage) return false;
+    const meta = getMessageMeta(latestAssistantMessage.meta);
+    return (
+      meta.status === "complete" &&
+      meta.task !== "none" &&
+      !(Array.isArray(meta.papers) && meta.papers.length > 0) &&
+      papersRequestStarted
+    );
+  }, [latestAssistantMessage, papersRequestStarted]);
+
   return {
     chat,
     thinkingPhase,
     assistantImages,
     shouldShowPendingAssistant,
     shouldShowSearchingImages,
+    shouldShowPendingPapers,
     orchestrationError,
     getMessageMeta,
   };

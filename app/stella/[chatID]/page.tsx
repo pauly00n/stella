@@ -20,6 +20,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
     assistantImages,
     shouldShowPendingAssistant,
     shouldShowSearchingImages,
+    shouldShowPendingPapers,
     orchestrationError,
     getMessageMeta,
   } = useChatOrchestration({
@@ -105,12 +106,14 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                           const status = meta.status;
                           const hasContent = message.content && message.content.trim().length > 0;
                           const isComplete = status === 'complete';
-                          
+
                           // Skip rendering if it's a placeholder (no content and not complete)
                           if (!hasContent && !isComplete) {
                             return null;
                           }
-                          
+
+                          const papers = meta.papers;
+
                           return (
                             <div className="pt-5 pb-5 w-full">
                               <div className="text-sm prose prose-sm prose-neutral dark:prose-invert text-left max-w-[650px] w-full mx-auto [&_p]:leading-[1.6] [&_li]:leading-[1.6] [&_p]:text-[15px] [&_li]:text-[15px]">
@@ -118,6 +121,43 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                                     {message.content}
                                   </ReactMarkdown>
                               </div>
+                              {/* Paper citations — shown once loaded, or skeleton while pending */}
+                              {papers && papers.length > 0 ? (
+                                <div className="max-w-[650px] w-full mx-auto mt-5 pt-4 border-t border-border">
+                                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                                    References
+                                  </div>
+                                  <div className="flex flex-col gap-3">
+                                    {papers.map((group, i) =>
+                                      group.paper ? (
+                                        <div key={i} className="flex flex-col gap-0.5">
+                                          <span className="text-xs text-muted-foreground">{group.diagnosisName}</span>
+                                          <a
+                                            href={group.paper.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline leading-snug"
+                                          >
+                                            {group.paper.title}
+                                          </a>
+                                          <span className="text-xs text-muted-foreground">{group.paper.authors}</span>
+                                        </div>
+                                      ) : null
+                                    )}
+                                  </div>
+                                </div>
+                              ) : shouldShowPendingPapers ? (
+                                <div className="max-w-[650px] w-full mx-auto mt-5 pt-4 border-t border-border">
+                                  <Skeleton className="h-3 w-24 mb-3" />
+                                  {[1, 2, 3].map((i) => (
+                                    <div key={i} className="flex flex-col gap-1 mb-3">
+                                      <Skeleton className="h-3 w-32" />
+                                      <Skeleton className="h-4 w-full" />
+                                      <Skeleton className="h-3 w-40" />
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
                             </div>
                           );
                         })()
