@@ -6,6 +6,8 @@
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
 const CX = process.env.SEARCH_CX || '';
+const PROVIDER_TIMEOUT_MS = 30000;
+const PROVIDER_MAX_RETRIES = 2;
 
 // Keywords for classification
 const KEYWORDS: Record<string, string[]> = {
@@ -376,6 +378,49 @@ export interface ImageGenerationResult {
   imageQuery?: string;
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+async function fetchWithRetry(
+  input: string | URL,
+  init: RequestInit,
+  options?: { timeoutMs?: number; retries?: number }
+): Promise<Response> {
+  const timeoutMs = options?.timeoutMs ?? PROVIDER_TIMEOUT_MS;
+  const retries = options?.retries ?? PROVIDER_MAX_RETRIES;
+  let attempt = 0;
+
+  while (true) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(input, { ...init, signal: controller.signal });
+      if (response.ok) return response;
+      if (attempt < retries && shouldRetryStatus(response.status)) {
+        await sleep(300 * 2 ** attempt);
+        attempt += 1;
+        continue;
+      }
+      return response;
+    } catch (error) {
+      if (attempt < retries) {
+        await sleep(300 * 2 ** attempt);
+        attempt += 1;
+        continue;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 /**
  * Classifies the report type based on keyword matching
  */
@@ -459,7 +504,7 @@ async function callGemini(promptText: string): Promise<string> {
   }
 
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST',
@@ -473,7 +518,8 @@ async function callGemini(promptText: string): Promise<string> {
             }]
           }]
         }),
-      }
+      },
+      { timeoutMs: PROVIDER_TIMEOUT_MS, retries: PROVIDER_MAX_RETRIES }
     );
 
     if (!response.ok) {
@@ -507,7 +553,11 @@ async function searchImages(query: string): Promise<ImageResult[]> {
     url.searchParams.set('imgSize', 'MEDIUM');
     url.searchParams.set('safe', 'active');
 
-    const response = await fetch(url.toString());
+    const response = await fetchWithRetry(
+      url.toString(),
+      { method: 'GET' },
+      { timeoutMs: PROVIDER_TIMEOUT_MS, retries: PROVIDER_MAX_RETRIES }
+    );
 
     if (!response.ok) {
       const errorData = await response.text();
@@ -631,4 +681,3 @@ export async function generateReport(request: GenerateRequest): Promise<Generate
     };
   }
 }
-

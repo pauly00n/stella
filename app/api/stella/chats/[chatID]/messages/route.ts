@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createRequestLogger } from "@/lib/observability/logger";
 
 async function getAuthenticatedUser() {
   const supabase = await createClient();
@@ -15,9 +16,16 @@ async function getAuthenticatedUser() {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ chatID: string }> },
 ) {
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const logger = createRequestLogger({
+    requestId,
+    route: "/api/stella/chats/[chatID]/messages",
+    method: "GET",
+  });
+
   const { chatID } = await params;
   const { supabase, user } = await getAuthenticatedUser();
   if (!user) {
@@ -32,7 +40,7 @@ export async function GET(
     .order("created_at", { ascending: true });
 
   if (error) {
-    console.error("Error fetching messages:", error);
+    logger.error("messages.list_failed", error, { userId: user.id, chatId: chatID });
     return NextResponse.json({ ok: false, error: "Failed to load messages" }, { status: 500 });
   }
 

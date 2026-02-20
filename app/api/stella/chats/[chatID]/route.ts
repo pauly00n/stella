@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { UpdateChatTitleBodySchema } from "@/lib/schemas/chat";
+import { createRequestLogger } from "@/lib/observability/logger";
 
 async function getAuthenticatedUser() {
   const supabase = await createClient();
@@ -16,9 +17,16 @@ async function getAuthenticatedUser() {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ chatID: string }> },
 ) {
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const logger = createRequestLogger({
+    requestId,
+    route: "/api/stella/chats/[chatID]",
+    method: "GET",
+  });
+
   const { chatID } = await params;
   const { supabase, user } = await getAuthenticatedUser();
   if (!user) {
@@ -33,7 +41,7 @@ export async function GET(
     .single();
 
   if (error || !data) {
-    console.error("Error fetching chat:", error);
+    logger.error("chat.get_failed", error, { userId: user.id, chatId: chatID });
     return NextResponse.json({ ok: false, error: "Failed to load chat" }, { status: 404 });
   }
 
@@ -44,6 +52,13 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ chatID: string }> },
 ) {
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const logger = createRequestLogger({
+    requestId,
+    route: "/api/stella/chats/[chatID]",
+    method: "PATCH",
+  });
+
   const { chatID } = await params;
   const { supabase, user } = await getAuthenticatedUser();
   if (!user) {
@@ -72,7 +87,7 @@ export async function PATCH(
     .single();
 
   if (error || !data) {
-    console.error("Error updating chat title:", error);
+    logger.error("chat.update_title_failed", error, { userId: user.id, chatId: chatID });
     return NextResponse.json({ ok: false, error: "Failed to update chat title" }, { status: 500 });
   }
 
@@ -80,9 +95,16 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ chatID: string }> },
 ) {
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const logger = createRequestLogger({
+    requestId,
+    route: "/api/stella/chats/[chatID]",
+    method: "DELETE",
+  });
+
   const { chatID } = await params;
   const { supabase, user } = await getAuthenticatedUser();
   if (!user) {
@@ -96,7 +118,7 @@ export async function DELETE(
     .eq("user_id", user.id);
 
   if (messagesError) {
-    console.error("Error deleting chat messages:", messagesError);
+    logger.error("chat.delete_messages_failed", messagesError, { userId: user.id, chatId: chatID });
     return NextResponse.json({ ok: false, error: "Failed to delete chat messages" }, { status: 500 });
   }
 
@@ -107,7 +129,7 @@ export async function DELETE(
     .eq("user_id", user.id);
 
   if (chatError) {
-    console.error("Error deleting chat:", chatError);
+    logger.error("chat.delete_failed", chatError, { userId: user.id, chatId: chatID });
     return NextResponse.json({ ok: false, error: "Failed to delete chat" }, { status: 500 });
   }
 

@@ -15,6 +15,7 @@ import {
   type InternalTask,
   type TaskType,
 } from '@/lib/schemas/chat';
+import { createRequestLogger } from '@/lib/observability/logger';
 
 function mapUiModeToInternalTask(
   mode: TaskType,
@@ -29,6 +30,12 @@ function mapUiModeToInternalTask(
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = request.headers.get('x-request-id') ?? crypto.randomUUID();
+  const logger = createRequestLogger({
+    requestId,
+    route: '/stella/generate',
+  });
+
   try {
     // Safely parse JSON body – handle empty / invalid payloads gracefully
     let jsonBody: unknown;
@@ -55,6 +62,7 @@ export async function POST(request: NextRequest) {
       showImages = false,
       operation = 'response',
       messageId,
+      idempotencyKey,
     } = body;
 
     if (!chatId) {
@@ -96,7 +104,10 @@ export async function POST(request: NextRequest) {
           .limit(1);
 
         if (userMsgError || !userMessages || userMessages.length === 0) {
-          console.error('No user message found to derive draft for images:', userMsgError);
+          logger.error('generate.images.no_user_message', userMsgError, {
+            chatId,
+            userId: user.id,
+          });
           return NextResponse.json(
             { ok: false, error: 'Missing draft for image generation' },
             { status: 400 }
@@ -135,7 +146,11 @@ export async function POST(request: NextRequest) {
       const { data: messages, error: fetchError } = await query;
 
       if (fetchError || !messages || messages.length === 0) {
-        console.error('No assistant message found to attach images to:', fetchError);
+        logger.error('generate.images.no_assistant_message', fetchError, {
+          chatId,
+          userId: user.id,
+          messageId: messageId ?? null,
+        });
         return NextResponse.json(
           { ok: false, error: 'No assistant message found for image attachment' },
           { status: 404 }
@@ -163,7 +178,11 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id);
 
       if (updateError) {
-        console.error('Failed updating message with images:', updateError);
+        logger.error('generate.images.update_failed', updateError, {
+          chatId,
+          userId: user.id,
+          messageId: target.message_id,
+        });
         return NextResponse.json(
           { ok: false, error: 'Failed to save images' },
           { status: 500 }
@@ -183,6 +202,44 @@ export async function POST(request: NextRequest) {
         { ok: false, error: 'Missing draft or mode' },
         { status: 400 }
       );
+    }
+
+    // Idempotency guard for response generation: if this request key already created
+    // an assistant message, return it instead of generating again.
+    if (idempotencyKey) {
+      const { data: existingMessages, error: existingError } = await supabase
+        .from('messages')
+        .select('message_id, meta')
+        .eq('chat_id', chatId)
+        .eq('user_id', user.id)
+        .eq('role', 'assistant')
+        .contains('meta', { idempotencyKey })
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (existingError) {
+        logger.error('generate.response.idempotency_lookup_failed', existingError, {
+          chatId,
+          userId: user.id,
+          idempotencyKey,
+        });
+      } else if (existingMessages && existingMessages.length > 0) {
+        const existing = existingMessages[0];
+        const parsedMeta = MessageMetaSchema.safeParse(existing.meta);
+        return NextResponse.json({
+          ok: true,
+          task: parsedMeta.success ? parsedMeta.data.task ?? null : null,
+          latencyMs: parsedMeta.success && typeof parsedMeta.data.latencyMs === 'number'
+            ? parsedMeta.data.latencyMs
+            : 0,
+          imagesCount:
+            parsedMeta.success && Array.isArray(parsedMeta.data.images)
+              ? parsedMeta.data.images.length
+              : 0,
+          messageId: existing.message_id,
+          idempotent: true,
+        });
+      }
     }
 
     const start = Date.now();
@@ -217,13 +274,18 @@ export async function POST(request: NextRequest) {
           task: mode === 'Auto' ? null : task,
           latencyMs: 0,
           showImages,
+          ...(idempotencyKey ? { idempotencyKey } : {}),
         },
       })
       .select('message_id')
       .single();
 
     if (placeholderError) {
-      console.error('Error inserting placeholder message:', placeholderError);
+      logger.error('generate.response.placeholder_insert_failed', placeholderError, {
+        chatId,
+        userId: user.id,
+        task,
+      });
       // Continue anyway - we'll insert at the end
     } else {
       placeholderMessageId = placeholderData.message_id;
@@ -240,6 +302,7 @@ export async function POST(request: NextRequest) {
               task: autoTask,
               latencyMs: Date.now() - start,
               showImages,
+              ...(idempotencyKey ? { idempotencyKey } : {}),
             },
           })
           .eq('message_id', placeholderMessageId)
@@ -266,6 +329,7 @@ export async function POST(request: NextRequest) {
               task,
               latencyMs: Date.now() - start,
               showImages,
+              ...(idempotencyKey ? { idempotencyKey } : {}),
             },
           })
           .eq('message_id', placeholderMessageId)
@@ -314,6 +378,7 @@ export async function POST(request: NextRequest) {
             task,
             latencyMs: textLatencyMs,
             showImages,
+            ...(idempotencyKey ? { idempotencyKey } : {}),
           },
         })
         .eq('message_id', placeholderMessageId)
@@ -322,7 +387,11 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (updateError) {
-        console.error('Error updating placeholder message:', updateError);
+        logger.error('generate.response.placeholder_update_failed', updateError, {
+          chatId,
+          userId: user.id,
+          messageId: placeholderMessageId,
+        });
         return NextResponse.json(
           { ok: false, error: 'Failed to update assistant message' },
           { status: 500 }
@@ -345,6 +414,7 @@ export async function POST(request: NextRequest) {
             task,
             latencyMs: textLatencyMs,
             showImages,
+            ...(idempotencyKey ? { idempotencyKey } : {}),
           },
         })
         .select('*')
@@ -352,7 +422,11 @@ export async function POST(request: NextRequest) {
         .limit(1);
 
       if (insertError) {
-        console.error('Error inserting assistant message:', insertError);
+        logger.error('generate.response.insert_failed', insertError, {
+          chatId,
+          userId: user.id,
+          task,
+        });
         return NextResponse.json(
           { ok: false, error: 'Failed to save assistant message' },
           { status: 500 }
@@ -378,7 +452,7 @@ export async function POST(request: NextRequest) {
       messageId: insertedMessages?.[0]?.message_id ?? null,
     });
   } catch (err) {
-    console.error('Error in /stella/generate:', err);
+    logger.error('generate.unhandled_error', err);
     return NextResponse.json(
       {
         ok: false,

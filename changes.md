@@ -30,18 +30,7 @@
 - Remove residual `any` usages outside core chat/generation path (e.g., auth/profile/UI utility areas).
 - Continue converting ambiguous payloads to schema-validated types.
 
-## 3. Reliability and Async Processing
-
-### Current issue
-- Polling-only UI sync and placeholder mutation patterns are fragile at scale.
-
-### Required changes
-- Add idempotency keys for generation requests.
-- Add retry policy with bounded backoff for provider calls.
-- Add timeout/circuit-breaker handling for Gemini/Search APIs.
-- Migrate from pure polling to push or hybrid updates (Supabase realtime/SSE).
-
-## 4. Observability and Operations
+## 3. Observability and Operations
 
 ### Required changes
 - Replace ad-hoc `console.log` with structured logging.
@@ -52,7 +41,7 @@
   - token usage/cost tracking
 - Integrate error monitoring (e.g., Sentry).
 
-## 5. Security and Abuse Controls
+## 4. Security and Abuse Controls
 
 ### Required changes
 - Add route-level rate limiting for generation endpoints.
@@ -60,7 +49,7 @@
 - Add prompt/content moderation guardrails before and after generation.
 - Sanitize/normalize all externally sourced content before rendering/storage.
 
-## 6. Medical/Clinical Safety Controls
+## 5. Medical/Clinical Safety Controls
 
 ### Required changes
 - Keep and strengthen non-clinical-use disclaimer across all generation surfaces.
@@ -68,7 +57,7 @@
 - Add policy checks for prohibited clinical directives.
 - Add human-review gates for any workflow that could be interpreted as decision support.
 
-## 7. Testing Strategy (Minimum Production Baseline)
+## 6. Testing Strategy (Minimum Production Baseline)
 
 ### Unit tests
 - Task mapping and task-selection parsing.
@@ -85,7 +74,7 @@
 - Signup disabled/enabled flows.
 - Broken-route regression tests for auth pages.
 
-## 8. Frontend Quality and UX Consistency
+## 7. Frontend Quality and UX Consistency
 
 ### Required changes
 - Consolidate loading/error states across chat pages and forms.
@@ -93,7 +82,7 @@
 - Remove debug logs from user-facing flows.
 - Add accessibility audits (keyboard nav, landmarks, labels, contrast).
 
-## 9. Config and Secrets Hygiene
+## 8. Config and Secrets Hygiene
 
 ### Required changes
 - Validate required env vars at startup.
@@ -101,21 +90,21 @@
 - Document env var contract in a tracked `.env.example`.
 - Enforce separation between public and server-only secrets.
 
-## 10. Database and Migration Discipline
+## 9. Database and Migration Discipline
 
 ### Required changes
 - Replace schema-only markdown docs with tracked SQL migrations.
 - Add index and constraint verification in migration scripts.
 - Add tests/checks for RLS policy behavior.
 
-## 11. Repository Hygiene
+## 10. Repository Hygiene
 
 ### Required changes
 - Add root `README.md` with architecture, runbook, and deployment instructions.
 - Add `CONTRIBUTING.md` with coding/testing standards.
 - Add ownership and review boundaries for critical areas (auth, generation, data).
 
-## 12. Prioritized Execution Plan
+## 11. Prioritized Execution Plan
 
 ### Phase 0 (1-3 days): Stability
 - Finalize dependency matrix alignment.
@@ -128,14 +117,12 @@
 
 ### Phase 2 (1-2 weeks): Reliability
 - Add integration and E2E tests for auth + generation.
-- Add idempotency and retry/backoff semantics.
-- Add provider timeout and fallback handling.
 
 ### Phase 3 (2-4 weeks): Production Maturity
 - Add observability dashboards and alerting thresholds.
 - Add migration-based DB lifecycle and RLS verification checks.
 
-## 13. Definition of “Industry Standard” for This Repo
+## 12. Definition of “Industry Standard” for This Repo
 
 The project is at industry-standard readiness when:
 - Dependency matrix is coherent and reproducible.

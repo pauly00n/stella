@@ -38,6 +38,7 @@ export const MessageMetaSchema = z
     latencyMs: z.number().optional(),
     showImages: z.boolean().optional(),
     imageQuery: z.string().optional(),
+    idempotencyKey: z.string().optional(),
   })
   .passthrough();
 
@@ -59,6 +60,7 @@ export const GenerateForChatBodySchema = z.object({
   mode: TaskTypeSchema.optional(),
   showImages: z.boolean().optional(),
   messageId: z.string().optional(),
+  idempotencyKey: z.string().trim().min(1).optional(),
 });
 
 export type TaskType = z.infer<typeof TaskTypeSchema>;

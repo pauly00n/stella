@@ -5,6 +5,7 @@ import {
   type TaskType,
   type DefaultTask,
 } from "@/lib/schemas/chat";
+import { createRequestLogger } from "@/lib/observability/logger";
 
 function mapTaskToDefaultTask(task: TaskType): DefaultTask {
   const taskMap: Record<TaskType, DefaultTask> = {
@@ -28,7 +29,14 @@ async function getAuthenticatedUser() {
   return { supabase, user };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const logger = createRequestLogger({
+    requestId,
+    route: "/api/stella/chats",
+    method: "GET",
+  });
+
   const { supabase, user } = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
@@ -41,7 +49,7 @@ export async function GET() {
     .order("updated_at", { ascending: false });
 
   if (error) {
-    console.error("Error fetching chats:", error);
+    logger.error("chats.list_failed", error, { userId: user.id });
     return NextResponse.json({ ok: false, error: "Failed to load chats" }, { status: 500 });
   }
 
@@ -49,6 +57,13 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const logger = createRequestLogger({
+    requestId,
+    route: "/api/stella/chats",
+    method: "POST",
+  });
+
   const { supabase, user } = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
@@ -82,7 +97,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (chatError || !chatData) {
-    console.error("Error creating chat:", chatError);
+    logger.error("chats.create_failed", chatError, { userId: user.id });
     return NextResponse.json({ ok: false, error: "Failed to create chat" }, { status: 500 });
   }
 
@@ -98,7 +113,10 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (messageError || !messageData) {
-    console.error("Error creating message:", messageError);
+    logger.error("messages.create_initial_failed", messageError, {
+      userId: user.id,
+      chatId: chatData.chat_id,
+    });
     // Best-effort cleanup to avoid orphan chat rows.
     await supabase.from("chats").delete().eq("chat_id", chatData.chat_id).eq("user_id", user.id);
     return NextResponse.json({ ok: false, error: "Failed to create message" }, { status: 500 });

@@ -20,7 +20,7 @@ function getMessageMeta(meta: unknown): MessageMeta {
 }
 
 function ChatPageContent({ chatID }: { chatID: string }) {
-  const { messages, loading, error, refetch } = useMessages(chatID);
+  const { messages, loading, error, refetch, realtimeConnected } = useMessages(chatID);
   const [chat, setChat] = useState<Chat | null>(null);
   const [thinkingPhase, setThinkingPhase] = useState<'analyzing' | 'generating' | 'refining' | 'searching' | null>(null);
   const [imagesRequestStarted, setImagesRequestStarted] = useState(false);
@@ -219,6 +219,10 @@ function ChatPageContent({ chatID }: { chatID: string }) {
 
   // While we're waiting on an assistant response OR pending images, keep polling.
   useEffect(() => {
+    // Hybrid updates model:
+    // - Use Realtime push updates when available
+    // - Keep polling while pending as a reliability backstop so
+    //   intermediate state changes are always reflected in UI.
     if (!shouldShowPendingAssistant && !shouldShowSearchingImages) return;
 
     const interval = setInterval(() => {
@@ -226,10 +230,10 @@ function ChatPageContent({ chatID }: { chatID: string }) {
       refetch({ silent: true }).catch(() => {
         // nope - we'll try again next tick
       });
-    }, 2000);
+    }, realtimeConnected ? 2500 : 2000);
 
     return () => clearInterval(interval);
-  }, [shouldShowPendingAssistant, shouldShowSearchingImages, refetch]);
+  }, [shouldShowPendingAssistant, shouldShowSearchingImages, realtimeConnected, refetch]);
 
   if (loading) {
     return <ChatLoadingSkeleton />;

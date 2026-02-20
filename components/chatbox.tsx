@@ -56,6 +56,7 @@ export function Chatbox() {
             draft: trimmed,
             mode: task,
             showImages: showImages === 'On',
+            idempotencyKey: crypto.randomUUID(),
           }),
         }).catch((err) => {
           console.error('Error triggering generation:', err);
@@ -223,5 +224,4 @@ export function Chatbox() {
     </Card>
   );
 }
-
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getMessagesByChatId, type Message } from '@/lib/services/chat-service';
+import { createClient } from '@/lib/supabase/client';
 
 interface UseMessagesResult {
   messages: Message[];
@@ -14,6 +15,11 @@ interface UseMessagesResult {
    * (so we don't show the full-page skeleton again).
    */
   refetch: (options?: { silent?: boolean }) => Promise<void>;
+  /**
+   * True when Supabase Realtime channel is actively subscribed.
+   * Used to disable aggressive polling when push updates are healthy.
+   */
+  realtimeConnected: boolean;
 }
 
 /**
@@ -25,6 +31,7 @@ export function useMessages(chatID: string | undefined): UseMessagesResult {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
   const hasLoadedOnceRef = useRef(false);
 
   const fetchMessages = useCallback(async (options?: { silent?: boolean }) => {
@@ -56,11 +63,43 @@ export function useMessages(chatID: string | undefined): UseMessagesResult {
     fetchMessages({ silent: false });
   }, [fetchMessages]);
 
+  useEffect(() => {
+    if (!chatID || typeof window === 'undefined') return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`messages-${chatID}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: `chat_id=eq.${chatID}`,
+        },
+        () => {
+          fetchMessages({ silent: true }).catch(() => {});
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setRealtimeConnected(true);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setRealtimeConnected(false);
+        }
+      });
+
+    return () => {
+      setRealtimeConnected(false);
+      supabase.removeChannel(channel).catch(() => {});
+    };
+  }, [chatID, fetchMessages]);
+
   return {
     messages,
     loading,
     error,
     refetch: fetchMessages,
+    realtimeConnected,
   };
 }
-
