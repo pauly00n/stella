@@ -383,7 +383,7 @@ export interface PaperGenerationResult {
  * Matches patterns like: **1. Osteosarcoma** or **2. Giant Cell Tumor (GCT)**
  */
 function extractDiagnosisNames(content: string): string[] {
-  const matches = [...content.matchAll(/\*\*\d+\.\s+([^*\n]+?)\*\*/g)];
+  const matches = Array.from(content.matchAll(/\*\*\d+\.\s+([^*\n]+?)\*\*/g));
   return matches.slice(0, 3).map((m) => m[1].trim());
 }
 
