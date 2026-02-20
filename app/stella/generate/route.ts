@@ -16,6 +16,7 @@ import {
   type TaskType,
 } from '@/lib/schemas/chat';
 import { createRequestLogger } from '@/lib/observability/logger';
+import { checkRateLimit } from '@/lib/security/rate-limit';
 
 function mapUiModeToInternalTask(
   mode: TaskType,
@@ -31,9 +32,12 @@ function mapUiModeToInternalTask(
 
 export async function POST(request: NextRequest) {
   const requestId = request.headers.get('x-request-id') ?? crypto.randomUUID();
+  const forwardedFor = request.headers.get('x-forwarded-for') ?? '';
+  const clientIp = forwardedFor.split(',')[0]?.trim() || 'unknown';
   const logger = createRequestLogger({
     requestId,
     route: '/stella/generate',
+    clientIp,
   });
 
   try {
@@ -82,6 +86,46 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { ok: false, error: 'User not authenticated' },
         { status: 401 }
+      );
+    }
+
+    const isImageOperation = operation === 'images';
+    const limit =
+      Number(
+        isImageOperation
+          ? process.env.RATE_LIMIT_GENERATE_IMAGES_PER_MINUTE
+          : process.env.RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE
+      ) || (isImageOperation ? 10 : 20);
+
+    const rateLimit = await checkRateLimit({
+      scope: isImageOperation ? 'generate:images' : 'generate:response',
+      identifier: user.id || clientIp,
+      limit,
+      windowSeconds: 60,
+    });
+
+    if (!rateLimit.allowed) {
+      logger.warn('generate.rate_limited', {
+        userId: user.id,
+        operation,
+        limit,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Rate limit exceeded. Please try again shortly.',
+          retryAfterSeconds: rateLimit.retryAfterSeconds,
+        },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.retryAfterSeconds),
+            'X-RateLimit-Limit': String(limit),
+            'X-RateLimit-Remaining': String(rateLimit.remaining),
+            'X-RateLimit-Reset': String(rateLimit.resetAtUnix),
+          },
+        }
       );
     }
 
