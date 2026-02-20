@@ -113,7 +113,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                           
                           return (
                             <div className="pt-5 pb-5 w-full">
-                              <div className="text-sm prose prose-sm prose-neutral dark:prose-invert text-left max-w-[650px] w-full mx-auto">
+                              <div className="text-sm prose prose-sm prose-neutral dark:prose-invert text-left max-w-[650px] w-full mx-auto [&_p]:leading-[1.6] [&_li]:leading-[1.6] [&_p]:text-[15px] [&_li]:text-[15px]">
                                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {message.content}
                                   </ReactMarkdown>
