@@ -10,6 +10,7 @@ const serverEnvSchema = z.object({
   GEMINI_API_KEY: z.string().min(1),
   SEARCH_API_KEY: z.string().optional(),
   SEARCH_CX: z.string().optional(),
+  SEMANTIC_SCHOLAR_API_KEY: z.string().optional(),
   RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE: z
     .string()
     .regex(/^\d+$/)
@@ -27,6 +28,7 @@ export const serverEnv = serverEnvSchema.parse({
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   SEARCH_API_KEY: process.env.SEARCH_API_KEY,
   SEARCH_CX: process.env.SEARCH_CX,
+  SEMANTIC_SCHOLAR_API_KEY: process.env.SEMANTIC_SCHOLAR_API_KEY,
   RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE:
     process.env.RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE,
   RATE_LIMIT_GENERATE_IMAGES_PER_MINUTE:

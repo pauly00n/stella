@@ -8,6 +8,7 @@ import { createRequestLogger } from '@/lib/observability/logger';
 const GEMINI_API_KEY = serverEnv.GEMINI_API_KEY;
 const SEARCH_API_KEY = serverEnv.SEARCH_API_KEY || '';
 const CX = serverEnv.SEARCH_CX || '';
+const SEMANTIC_SCHOLAR_API_KEY = serverEnv.SEMANTIC_SCHOLAR_API_KEY || '';
 const PROVIDER_TIMEOUT_MS = 90000;
 const PROVIDER_MAX_RETRIES = 2;
 const logger = createRequestLogger({ route: 'lib/services/generate-service' });
@@ -400,14 +401,21 @@ function extractDiagnosisNames(content: string): string[] {
 }
 
 async function searchPaper(diagnosisName: string): Promise<PaperResult | null> {
-  // Add "radiology" or "MRI" to the query to get imaging-relevant papers
   const query = `${diagnosisName} MRI radiology imaging`;
-  const apiUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&fields=title,authors,year,url,paperId&limit=5`;
+  const url = new URL('https://api.semanticscholar.org/graph/v1/paper/search');
+  url.searchParams.set('query', query);
+  url.searchParams.set('fields', 'title,authors,year,url,paperId,citationCount');
+  url.searchParams.set('limit', '10');
+
+  const headers: Record<string, string> = {};
+  if (SEMANTIC_SCHOLAR_API_KEY) {
+    headers['x-api-key'] = SEMANTIC_SCHOLAR_API_KEY;
+  }
 
   try {
     const response = await fetchWithRetry(
-      apiUrl,
-      { method: 'GET' },
+      url.toString(),
+      { method: 'GET', headers },
       { timeoutMs: 15000, retries: 3 }
     );
 
@@ -426,30 +434,43 @@ async function searchPaper(diagnosisName: string): Promise<PaperResult | null> {
       paperId?: string;
       authors?: Array<{ name: string }>;
       year?: number;
+      citationCount?: number;
     }> = data.data ?? [];
 
-    // Pick the best result: prefer papers with a year and authors, skip empty titles
-    const paper = results.find((p) => p.title && p.title.trim().length > 0) ?? null;
-    if (!paper) return null;
+    // Filter to candidates with a meaningful title (>10 chars) and a resolvable URL
+    const candidates = results.filter(
+      (p) =>
+        p.title &&
+        p.title.trim().length > 10 &&
+        (p.url || p.paperId)
+    );
 
-    // url field is sometimes absent — construct from paperId
+    if (candidates.length === 0) return null;
+
+    // Prefer papers that have both a year and authors; among those, pick the most-cited
+    const withMeta = candidates.filter((p) => p.year && p.authors && p.authors.length > 0);
+    const pool = withMeta.length > 0 ? withMeta : candidates;
+    const best = pool.reduce((top, p) =>
+      (p.citationCount ?? 0) > (top.citationCount ?? 0) ? p : top
+    );
+
     const paperUrl =
-      paper.url ||
-      (paper.paperId ? `https://www.semanticscholar.org/paper/${paper.paperId}` : '');
+      best.url ||
+      (best.paperId ? `https://www.semanticscholar.org/paper/${best.paperId}` : '');
 
     if (!paperUrl) return null;
 
-    const names = (paper.authors ?? []).map((a) => a.name);
+    const names = (best.authors ?? []).map((a) => a.name);
     const authorStr =
       names.length === 0 ? '' :
       names.length > 2 ? `${names[0]} et al.` :
       names.join(', ');
-    const authorsYear = paper.year
-      ? authorStr ? `${authorStr} (${paper.year})` : `${paper.year}`
+    const authorsYear = best.year
+      ? authorStr ? `${authorStr} (${best.year})` : String(best.year)
       : authorStr;
 
     return {
-      title: paper.title ?? '',
+      title: best.title ?? '',
       authors: authorsYear,
       url: paperUrl,
     };
@@ -461,13 +482,26 @@ async function searchPaper(diagnosisName: string): Promise<PaperResult | null> {
 
 /**
  * Searches Semantic Scholar for one paper per differential diagnosis extracted
- * from a completed diagnostic report. Runs all 3 searches in parallel.
+ * from a completed diagnostic report.
+ * With an API key: runs all searches in parallel (100 req/sec limit).
+ * Without: staggers at 1.1s intervals to respect the unauthenticated rate limit.
  */
 export async function searchPapersForContent(content: string): Promise<PaperGenerationResult> {
   const names = extractDiagnosisNames(content);
   if (names.length === 0) return { groups: [] };
 
-  // Stagger requests — Semantic Scholar free tier allows 1 req/sec without an API key
+  if (SEMANTIC_SCHOLAR_API_KEY) {
+    // Authenticated — parallel is safe
+    const results = await Promise.all(
+      names.map(async (name) => ({
+        diagnosisName: name,
+        paper: await searchPaper(name),
+      }))
+    );
+    return { groups: results };
+  }
+
+  // Unauthenticated — stagger to respect 1 req/sec limit
   const groups: DiagnosisPaperGroup[] = [];
   for (let i = 0; i < names.length; i++) {
     if (i > 0) await sleep(1100);
@@ -476,7 +510,6 @@ export async function searchPapersForContent(content: string): Promise<PaperGene
       paper: await searchPaper(names[i]),
     });
   }
-
   return { groups };
 }
 
