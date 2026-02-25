@@ -1,0 +1,27 @@
+vercel ai sdk
+- server sent requests, streaming, texts into llm
+
+
+category not as important
+- arthritis: which arthritis is it? ?????? ???
+- problem based: i have a mass, what is my differential | i have arthritis, what is my differential? 
+- mass can be infection, infection is another differential
+
+category of infection can/should be the end goal result from the user query
+
+
+differential:
+- description of the case, imaging details, mri, history, pathology, --- multimodality (natural query)
+
+- we have a mass:
+differential on this? could be a buncha tumors. OR could also be something else like an infection / trauma, which don't have further differentials
+
+
+vectorized open search library
+
+
+differential diagnosis of radiology
+
+
+implement in stella
+- do something? 

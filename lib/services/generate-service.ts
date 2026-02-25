@@ -8,7 +8,7 @@ import { createRequestLogger } from '@/lib/observability/logger';
 const GEMINI_API_KEY = serverEnv.GEMINI_API_KEY;
 const SEARCH_API_KEY = serverEnv.SEARCH_API_KEY || '';
 const CX = serverEnv.SEARCH_CX || '';
-const PROVIDER_TIMEOUT_MS = 30000;
+const PROVIDER_TIMEOUT_MS = 90000;
 const PROVIDER_MAX_RETRIES = 2;
 const logger = createRequestLogger({ route: 'lib/services/generate-service' });
 
@@ -169,7 +169,9 @@ async function fetchWithRetry(
       const response = await fetch(input, { ...init, signal: controller.signal });
       if (response.ok) return response;
       if (attempt < retries && shouldRetryStatus(response.status)) {
-        await sleep(300 * 2 ** attempt);
+        // Use a longer base delay for rate limit responses
+        const baseMs = response.status === 429 ? 1000 : 300;
+        await sleep(baseMs * 2 ** attempt);
         attempt += 1;
         continue;
       }
@@ -249,7 +251,7 @@ async function callGemini(promptText: string): Promise<string> {
   }
 
   const response = await fetchWithRetry(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
     {
       method: 'POST',
       headers: {
@@ -380,22 +382,33 @@ export interface PaperGenerationResult {
 
 /**
  * Extracts the top 3 diagnosis names from a diagnostic markdown report.
- * Matches patterns like: **1. Osteosarcoma** or **2. Giant Cell Tumor (GCT)**
+ * Handles formats like:
+ *   **1. Osteosarcoma** ...
+ *   **1. Giant Cell Tumor (GCT)** ...
+ *   **1. Tenosynovial Giant Cell Tumor, Localized Type** ...
  */
 function extractDiagnosisNames(content: string): string[] {
+  // Match **N. Diagnosis Name** — capture everything between the bold markers after the number
   const matches = Array.from(content.matchAll(/\*\*\d+\.\s+([^*\n]+?)\*\*/g));
-  return matches.slice(0, 3).map((m) => m[1].trim());
+  return matches
+    .slice(0, 3)
+    .map((m) => {
+      // Strip trailing parenthetical abbreviations like "(GCT)" for cleaner search
+      return m[1].trim().replace(/\s*\([^)]*\)\s*$/, '').trim();
+    })
+    .filter(Boolean);
 }
 
 async function searchPaper(diagnosisName: string): Promise<PaperResult | null> {
-  const query = diagnosisName;
-  const apiUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&fields=title,authors,year,url&limit=3`;
+  // Add "radiology" or "MRI" to the query to get imaging-relevant papers
+  const query = `${diagnosisName} MRI radiology imaging`;
+  const apiUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&fields=title,authors,year,url,paperId&limit=5`;
 
   try {
     const response = await fetchWithRetry(
       apiUrl,
       { method: 'GET' },
-      { timeoutMs: 10000, retries: 1 }
+      { timeoutMs: 15000, retries: 3 }
     );
 
     if (!response.ok) {
@@ -407,23 +420,33 @@ async function searchPaper(diagnosisName: string): Promise<PaperResult | null> {
     }
 
     const data = await response.json();
-    const results: Array<{ title?: string; url?: string; paperId?: string; authors?: Array<{ name: string }>; year?: number }> = data.data ?? [];
+    const results: Array<{
+      title?: string;
+      url?: string;
+      paperId?: string;
+      authors?: Array<{ name: string }>;
+      year?: number;
+    }> = data.data ?? [];
 
-    logger.info?.('generate.papers.search_result', {
-      diagnosisName,
-      resultCount: results.length,
-      titles: results.map((r) => r.title),
-    });
-
-    const paper = results.find((p) => p.title);
+    // Pick the best result: prefer papers with a year and authors, skip empty titles
+    const paper = results.find((p) => p.title && p.title.trim().length > 0) ?? null;
     if (!paper) return null;
 
-    // url field is sometimes absent — fall back to constructing from paperId
-    const paperUrl = paper.url || (paper.paperId ? `https://www.semanticscholar.org/paper/${paper.paperId}` : '');
+    // url field is sometimes absent — construct from paperId
+    const paperUrl =
+      paper.url ||
+      (paper.paperId ? `https://www.semanticscholar.org/paper/${paper.paperId}` : '');
+
+    if (!paperUrl) return null;
 
     const names = (paper.authors ?? []).map((a) => a.name);
-    const authorStr = names.length > 2 ? `${names[0]} et al.` : names.join(', ');
-    const authorsYear = paper.year ? `${authorStr} (${paper.year})` : authorStr;
+    const authorStr =
+      names.length === 0 ? '' :
+      names.length > 2 ? `${names[0]} et al.` :
+      names.join(', ');
+    const authorsYear = paper.year
+      ? authorStr ? `${authorStr} (${paper.year})` : `${paper.year}`
+      : authorStr;
 
     return {
       title: paper.title ?? '',
@@ -444,15 +467,107 @@ export async function searchPapersForContent(content: string): Promise<PaperGene
   const names = extractDiagnosisNames(content);
   if (names.length === 0) return { groups: [] };
 
+  // Stagger requests — Semantic Scholar free tier allows 1 req/sec without an API key
   const groups: DiagnosisPaperGroup[] = [];
-  for (const name of names) {
+  for (let i = 0; i < names.length; i++) {
+    if (i > 0) await sleep(1100);
     groups.push({
-      diagnosisName: name,
-      paper: await searchPaper(name),
+      diagnosisName: names[i],
+      paper: await searchPaper(names[i]),
     });
   }
 
   return { groups };
+}
+
+/**
+ * Streams a differential diagnosis from Gemini using SSE.
+ * Yields text chunks as they arrive. The caller is responsible for assembling
+ * the full text and persisting it to the DB.
+ */
+export async function* streamGeminiReport(
+  request: GenerateRequest
+): AsyncGenerator<string, void, unknown> {
+  const { draft, differentialBias = 'Auto' } = request;
+
+  if (!draft || !draft.trim()) {
+    throw new Error('Description is empty');
+  }
+
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY is not configured');
+  }
+
+  const prompt = buildDiagnosticPrompt(draft, differentialBias);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': GEMINI_API_KEY,
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            thinkingConfig: { thinkingBudget: 0 },
+          },
+        }),
+        signal: controller.signal,
+      }
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const errorData = await response.text();
+    throw new Error(`Gemini streaming API error: ${response.status} - ${errorData}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Gemini streaming API returned no body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      // Keep the last (potentially incomplete) line in the buffer
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const jsonStr = trimmed.slice(5).trim();
+        if (!jsonStr || jsonStr === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const chunk: string =
+            parsed?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          if (chunk) yield chunk;
+        } catch {
+          // Malformed SSE line — skip
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /**

@@ -1,9 +1,10 @@
-'use server';
+export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import {
   generateReport,
+  streamGeminiReport,
   generateImagesForDraft,
   selectTaskForAutoMode,
   searchPapersForContent,
@@ -389,134 +390,173 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    let resultText: string;
-
+    // task === 'none': static response, no streaming needed
     if (task === 'none') {
-      resultText =
+      const resultText =
         'The description does not appear to be a radiology or clinical imaging finding. Please describe imaging features, mass characteristics, or clinical findings.';
+      const noneLatencyMs = Date.now() - start;
+      const noneMeta = {
+        status: 'complete' as const,
+        images: [],
+        task,
+        latencyMs: noneLatencyMs,
+        showImages,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      };
 
+      let noneMessageId: string | null = null;
       if (placeholderMessageId) {
-        await supabase
+        const { data: updatedData, error: updateError } = await supabase
           .from('messages')
-          .update({
-            content: resultText,
-            meta: {
-              status: 'complete',
-              images: [],
-              task,
-              latencyMs: Date.now() - start,
-              showImages,
-              ...(idempotencyKey ? { idempotencyKey } : {}),
-            },
-          })
+          .update({ content: resultText, meta: noneMeta })
           .eq('message_id', placeholderMessageId)
-          .eq('user_id', user.id);
-      }
-    } else {
-      const gen = await generateReport({
-        draft,
-        differentialBias: mode,
-      });
-
-      if (!gen.ok || !gen.result) {
-        if (placeholderMessageId) {
-          await supabase
-            .from('messages')
-            .delete()
-            .eq('message_id', placeholderMessageId)
-            .eq('user_id', user.id);
+          .eq('user_id', user.id)
+          .select('message_id')
+          .single();
+        if (updateError) {
+          logger.error('generate.response.placeholder_update_failed', updateError, { chatId, userId: user.id });
+          return NextResponse.json({ ok: false, error: 'Failed to update assistant message' }, { status: 500 });
         }
-        return NextResponse.json(
-          { ok: false, error: gen.error || 'Generation failed' },
-          { status: 500 }
-        );
+        noneMessageId = updatedData.message_id;
+      } else {
+        const { data: newMsg, error: insertError } = await supabase
+          .from('messages')
+          .insert({ chat_id: chatId, user_id: user.id, role: 'assistant', content: resultText, meta: noneMeta })
+          .select('message_id')
+          .single();
+        if (insertError) {
+          logger.error('generate.response.insert_failed', insertError, { chatId, userId: user.id, task });
+          return NextResponse.json({ ok: false, error: 'Failed to save assistant message' }, { status: 500 });
+        }
+        noneMessageId = newMsg.message_id;
       }
-
-      resultText = gen.result;
+      await supabase.from('chats').update({ updated_at: new Date().toISOString() }).eq('chat_id', chatId).eq('user_id', user.id);
+      return NextResponse.json({ ok: true, task, latencyMs: noneLatencyMs, messageId: noneMessageId });
     }
 
-    const textLatencyMs = Date.now() - start;
+    // task === 'diagnostic': stream Gemini response via SSE.
+    // Use a queue-based ReadableStream so each enqueued chunk is flushed to the
+    // socket immediately by Next.js's pipeToNodeResponse, rather than being
+    // held in a TransformStream internal buffer.
+    const encoder = new TextEncoder();
+    const queue: Uint8Array[] = [];
+    let streamDone = false;
+    // notify() is set by the ReadableStream pull() to wake it when data arrives
+    const notifier = { notify: null as null | (() => void) };
 
-    // Update placeholder or insert new message
-    let insertedMessageId: string | null = null;
+    const readable = new ReadableStream({
+      async pull(controller) {
+        console.log('[stream] pull called, queue:', queue.length, 'done:', streamDone);
+        // Wait until there's something in the queue or the stream is done.
+        while (queue.length === 0 && !streamDone) {
+          await new Promise<void>((resolve) => { notifier.notify = resolve; });
+        }
+        if (queue.length > 0) {
+          const chunk = queue.shift()!;
+          console.log('[stream] enqueuing chunk, size:', chunk.length);
+          controller.enqueue(chunk);
+        } else {
+          console.log('[stream] closing controller');
+          controller.close();
+        }
+      },
+    });
 
-    if (placeholderMessageId) {
-      const { data: updatedData, error: updateError } = await supabase
-        .from('messages')
-        .update({
-          content: resultText,
-          meta: {
-            status: 'complete',
-            images: [],
-            task,
-            latencyMs: textLatencyMs,
-            showImages,
-            ...(idempotencyKey ? { idempotencyKey } : {}),
-          },
-        })
-        .eq('message_id', placeholderMessageId)
-        .eq('user_id', user.id)
-        .select('message_id')
-        .single();
+    const send = (obj: Record<string, unknown>) => {
+      const encoded = encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
+      queue.push(encoded);
+      console.log('[stream] send(), queue now:', queue.length, 'keys:', Object.keys(obj).join(','));
+      if (notifier.notify) { notifier.notify(); notifier.notify = null; }
+    };
 
-      if (updateError) {
-        logger.error('generate.response.placeholder_update_failed', updateError, {
-          chatId,
-          userId: user.id,
-          messageId: placeholderMessageId,
-        });
-        return NextResponse.json(
-          { ok: false, error: 'Failed to update assistant message' },
-          { status: 500 }
-        );
-      }
-      insertedMessageId = updatedData.message_id;
-    } else {
-      const { data: newMessages, error: insertError } = await supabase
-        .from('messages')
-        .insert({
-          chat_id: chatId,
-          user_id: user.id,
-          role: 'assistant',
-          content: resultText,
-          meta: {
-            status: 'complete',
-            images: [],
-            task,
-            latencyMs: textLatencyMs,
-            showImages,
-            ...(idempotencyKey ? { idempotencyKey } : {}),
-          },
-        })
-        .select('message_id')
-        .single();
+    const closeStream = () => {
+      streamDone = true;
+      console.log('[stream] closeStream()');
+      if (notifier.notify) { notifier.notify(); notifier.notify = null; }
+    };
 
-      if (insertError) {
-        logger.error('generate.response.insert_failed', insertError, {
-          chatId,
-          userId: user.id,
+    // Run the async generation in the background; the readable is returned
+    // immediately so Next.js starts streaming before the async work completes.
+    (async () => {
+      try {
+        send({ placeholderMessageId });
+
+        let fullText = '';
+
+        try {
+          for await (const chunk of streamGeminiReport({ draft, differentialBias: mode })) {
+            fullText += chunk;
+            send({ chunk });
+          }
+        } catch (streamErr) {
+          logger.error('generate.response.stream_failed', streamErr, { chatId, userId: user.id });
+          if (placeholderMessageId) {
+            await supabase.from('messages').delete().eq('message_id', placeholderMessageId).eq('user_id', user.id);
+          }
+          send({ error: 'Streaming generation failed' });
+          closeStream();
+          return;
+        }
+
+        const textLatencyMs = Date.now() - start;
+        const finalMeta = {
+          status: 'complete' as const,
+          images: [],
           task,
-        });
-        return NextResponse.json(
-          { ok: false, error: 'Failed to save assistant message' },
-          { status: 500 }
-        );
+          latencyMs: textLatencyMs,
+          showImages,
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        };
+
+        let insertedMessageId: string | null = null;
+
+        if (placeholderMessageId) {
+          const { data: updatedData, error: updateError } = await supabase
+            .from('messages')
+            .update({ content: fullText, meta: finalMeta })
+            .eq('message_id', placeholderMessageId)
+            .eq('user_id', user.id)
+            .select('message_id')
+            .single();
+          if (updateError) {
+            logger.error('generate.response.placeholder_update_failed', updateError, { chatId, userId: user.id });
+            send({ error: 'Failed to persist generated message' });
+            closeStream();
+            return;
+          }
+          insertedMessageId = updatedData.message_id;
+        } else {
+          const { data: newMsg, error: insertError } = await supabase
+            .from('messages')
+            .insert({ chat_id: chatId, user_id: user.id, role: 'assistant', content: fullText, meta: finalMeta })
+            .select('message_id')
+            .single();
+          if (insertError) {
+            logger.error('generate.response.insert_failed', insertError, { chatId, userId: user.id, task });
+            send({ error: 'Failed to save assistant message' });
+            closeStream();
+            return;
+          }
+          insertedMessageId = newMsg.message_id;
+        }
+
+        await supabase.from('chats').update({ updated_at: new Date().toISOString() }).eq('chat_id', chatId).eq('user_id', user.id);
+
+        send({ done: true, task, latencyMs: textLatencyMs, messageId: insertedMessageId });
+        closeStream();
+      } catch (err) {
+        logger.error('generate.response.stream_bg_error', err, { chatId, userId: user.id });
+        closeStream();
       }
-      insertedMessageId = newMessages.message_id;
-    }
+    })();
 
-    // Update chat updated_at
-    await supabase
-      .from('chats')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('chat_id', chatId)
-      .eq('user_id', user.id);
-
-    return NextResponse.json({
-      ok: true,
-      task,
-      latencyMs: textLatencyMs,
-      messageId: insertedMessageId,
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      },
     });
   } catch (err) {
     logger.error('generate.unhandled_error', err);

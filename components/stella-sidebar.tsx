@@ -276,14 +276,17 @@ export default function StellaSidebar({
                 return (
                   <div
                     key={chat.chat_id}
-                    className={`w-full flex justify-between items-center text-left h-auto py-2 px-2 ${isSidebarExpanded ? `hover:${BUTTON_HOVER_COLOR}` : ''} group relative cursor-pointer rounded-md transition-colors ${
+                    className={`w-full flex justify-between items-center text-left h-auto py-2 px-2 ${isSidebarExpanded ? `hover:${BUTTON_HOVER_COLOR}` : ''} group relative rounded-md transition-colors ${
                       isActive && isSidebarExpanded ? 'bg-muted/90' : ''
-                    } ${!isSidebarExpanded && isEditing ? 'cursor-not-allowed' : ''}`}
-                    onClick={() => {
-                      if (!isSidebarExpanded || isEditing) return;
-                      router.push(`/stella/${chat.chat_id}`);
-                    }}
+                    }`}
                   >
+                    {isSidebarExpanded && !isEditing && (
+                      <Link
+                        href={`/stella/${chat.chat_id}`}
+                        className="absolute inset-0 z-10 rounded-md"
+                        aria-label={chat.title || 'Untitled chat'}
+                      />
+                    )}
                     <div className="flex-1 min-w-0" onClick={(e) => isEditing && e.stopPropagation()}>
                       {isEditing ? (
                         <input
@@ -376,7 +379,7 @@ export default function StellaSidebar({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={`h-6 w-6 transition-all duration-200 hover:${BUTTON_HOVER_COLOR} hover:h-6 hover:w-6 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
+                            className={`relative z-20 h-6 w-6 transition-all duration-200 hover:${BUTTON_HOVER_COLOR} hover:h-6 hover:w-6 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
                               isEditing ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'
                             }`}
                             onClick={(e) => e.stopPropagation()}

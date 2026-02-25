@@ -141,3 +141,65 @@ export async function deleteChat(chatID: string): Promise<void> {
     method: 'DELETE',
   });
 }
+
+export type StreamGenerateEvent =
+  | { placeholderMessageId: string }
+  | { chunk: string }
+  | { done: true; task: string; latencyMs: number; messageId: string }
+  | { error: string };
+
+/**
+ * Calls POST /stella/generate with operation='response' and reads the SSE stream.
+ * Yields typed events: first a placeholderMessageId, then chunk strings, then done/error.
+ */
+export async function* streamGenerate(params: {
+  chatId: string;
+  draft: string;
+  mode: TaskType;
+  showImages: boolean;
+  idempotencyKey: string;
+}): AsyncGenerator<StreamGenerateEvent, void, unknown> {
+  const response = await fetch('/stella/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operation: 'response', ...params }),
+  });
+
+  if (!response.ok) {
+    let errMsg = 'Generation request failed';
+    try {
+      const payload = await response.json();
+      if (typeof payload?.error === 'string') errMsg = payload.error;
+    } catch { /* no-op */ }
+    throw new Error(errMsg);
+  }
+
+  if (!response.body) throw new Error('No response body from generate endpoint');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const jsonStr = trimmed.slice(5).trim();
+        if (!jsonStr || jsonStr === '[DONE]') continue;
+        try {
+          yield JSON.parse(jsonStr) as StreamGenerateEvent;
+        } catch { /* malformed line — skip */ }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

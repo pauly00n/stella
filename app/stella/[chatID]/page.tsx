@@ -13,6 +13,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { Message } from '@/lib/services/chat-service';
 
 function ChatPageContent({ chatID }: { chatID: string }) {
+  useEffect(() => {
+    console.log('[ChatPageContent] MOUNTED, chatID:', chatID);
+    return () => console.log('[ChatPageContent] UNMOUNTED, chatID:', chatID);
+  }, [chatID]);
+
   const { messages, loading, error, refetch, realtimeConnected } = useMessages(chatID);
   const {
     chat,
@@ -23,6 +28,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
     shouldShowPendingPapers,
     orchestrationError,
     getMessageMeta,
+    streamingContent,
   } = useChatOrchestration({
     chatID,
     messages,
@@ -41,7 +47,7 @@ function ChatPageContent({ chatID }: { chatID: string }) {
     trackHover: true,
   });
 
-  if (loading) {
+  if (loading && messages.length === 0) {
     return <ChatLoadingSkeleton />;
   }
 
@@ -174,27 +180,39 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                   );
                 })}
 
-                {(shouldShowPendingAssistant) && (
+                {shouldShowPendingAssistant && (
                   <div className="pt-10 max-w-[650px] w-full">
-                    {thinkingPhase && (
+                    {void console.log('[render] shouldShowPendingAssistant=true streamingContent.len=', streamingContent?.length ?? 0)}
+                    {/* Thinking phase label — shown only during the auto-mode task analysis phase */}
+                    {thinkingPhase === 'analyzing' && !streamingContent && (
                       <div className="mb-3">
-                      <span className="text-muted-foreground text-sm animate-pulse">
-                        {thinkingPhase === 'analyzing' && 'Analyzing description...'}
-                        {thinkingPhase === 'generating' && 'Generating differential diagnosis...'}
-                      </span>
+                        <span className="text-muted-foreground text-sm animate-pulse">
+                          Analyzing description...
+                        </span>
                       </div>
                     )}
-                    {shouldShowPendingAssistant && Array.from({ length: 9 }).map((_, index) => {
-                      const widths = [100, 90, 70, 95, 75, 88, 92, 80, 96] ;
-                      const width = widths[index % widths.length];
-                      return (
-                        <Skeleton
-                          key={`pending-${index}`}
-                          className="h-4 rounded mb-5 transition-all duration-1000 whitespace-pre-wrap self-start"
-                          style={{ width: `${width}%` }}
-                        />
-                      );
-                    })}
+
+                    {streamingContent ? (
+                      /* Live streaming text — replaces the skeleton */
+                      <div className="text-sm prose prose-sm prose-neutral dark:prose-invert text-left w-full [&_p]:leading-[1.6] [&_li]:leading-[1.6] [&_p]:text-[15px] [&_li]:text-[15px]">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {streamingContent}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      /* Skeleton — shown while waiting for first chunk */
+                      Array.from({ length: 9 }).map((_, index) => {
+                        const widths = [100, 90, 70, 95, 75, 88, 92, 80, 96];
+                        const width = widths[index % widths.length];
+                        return (
+                          <Skeleton
+                            key={`pending-${index}`}
+                            className="h-4 rounded mb-5 transition-all duration-1000 whitespace-pre-wrap self-start"
+                            style={{ width: `${width}%` }}
+                          />
+                        );
+                      })
+                    )}
                   </div>
                 )}
               </>

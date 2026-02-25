@@ -16,6 +16,16 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { createChatWithMessage, type TaskType } from '@/lib/services/chat-service';
 
+export interface PendingGeneration {
+  chatId: string;
+  draft: string;
+  mode: TaskType;
+  showImages: boolean;
+  idempotencyKey: string;
+}
+
+export const PENDING_GENERATION_KEY = 'stella:pendingGeneration';
+
 export function Chatbox() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -45,24 +55,18 @@ export function Chatbox() {
           textareaRef.current.style.height = `${MIN_HEIGHT}px`;
         }
 
-        // Redirect immediately — chat page polls for the response
-        window.location.href = `/stella/${chat.chat_id}`;
+        // Store generation params for the chat page to pick up and stream
+        const pendingGeneration: PendingGeneration = {
+          chatId: chat.chat_id,
+          draft: trimmed,
+          mode: task,
+          showImages: showImages === 'On',
+          idempotencyKey: crypto.randomUUID(),
+        };
+        sessionStorage.setItem(PENDING_GENERATION_KEY, JSON.stringify(pendingGeneration));
 
-        // Fire generate in background (don't await — chat page polls for updates)
-        fetch('/stella/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            operation: 'response',
-            chatId: chat.chat_id,
-            draft: trimmed,
-            mode: task,
-            showImages: showImages === 'On',
-            idempotencyKey: crypto.randomUUID(),
-          }),
-        }).catch(() => {
-          // Error will surface via chat page polling
-        });
+        // Redirect — chat page will read sessionStorage and start the stream
+        window.location.href = `/stella/${chat.chat_id}`;
       } catch (error) {
         if (error instanceof Error && error.message === 'User not authenticated') {
           // If there is no auth session, send the user to login.
