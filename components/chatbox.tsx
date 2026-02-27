@@ -192,9 +192,10 @@ export function Chatbox() {
                       onClick={() => setTask(option)}
                       className={`w-full px-3 py-2 rounded-full text-sm font-medium transition-colors text-left ${
                         task === option
-                          ? 'bg-red-500 text-white'
+                          ? 'text-white'
                           : 'bg-muted text-muted-foreground hover:bg-muted/80'
                       }`}
+                      style={task === option ? { backgroundColor: 'var(--stella-accent)' } : undefined}
                     >
                       {option === 'Auto' ? 'Auto (Recommended)' : option}
                     </button>
@@ -216,9 +217,10 @@ export function Chatbox() {
                       onClick={() => setShowImages(option)}
                       className={`flex-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                         showImages === option
-                          ? 'bg-red-500 text-white'
+                          ? 'text-white'
                           : 'bg-muted text-muted-foreground hover:bg-muted/80'
                       }`}
+                      style={showImages === option ? { backgroundColor: 'var(--stella-accent)' } : undefined}
                     >
                       {option}
                     </button>
@@ -232,7 +234,8 @@ export function Chatbox() {
             onClick={handleSend}
             disabled={!message.trim() || isSending}
             size="icon"
-            className="h-9 w-9 rounded-full bg-red-500 hover:bg-red-600 text-white"
+            className="h-9 w-9 rounded-full text-white"
+            style={{ backgroundColor: 'var(--stella-accent)' }}
           >
             <ArrowRight className="h-5 w-5" />
           </Button>

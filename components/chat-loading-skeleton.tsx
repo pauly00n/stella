@@ -25,7 +25,7 @@ export function ChatLoadingSkeleton() {
           <div className="flex flex-col items-center space-y-6 w-full">
             <div className="py-4"></div>
             {/* User message skeleton - top right, shorter */}
-            <Skeleton className="h-12 max-w-[500px] w-full rounded bg-red-500/10 transition-all duration-500 self-end" />
+            <Skeleton className="h-12 max-w-[500px] w-full rounded transition-all duration-500 self-end" style={{ backgroundColor: 'var(--stella-accent-muted)' }} />
 
             <div className="py-2"></div>
             {/* Assistant message skeleton - centered, left-aligned text */}

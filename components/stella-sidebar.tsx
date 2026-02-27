@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { PanelLeftOpen, PanelLeft, PanelRightOpen, Plus, Search, MessageSquare, Settings, User, LogOut, ChevronDown, ChevronUp, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import SettingsModal from '@/components/settings-modal';
 import { createClient } from '@/lib/supabase/client';
 import { useChats } from '@/hooks/use-chats';
 import { useScrollbarVisibility } from '@/hooks/use-scrollbar-visibility';
@@ -54,6 +55,7 @@ export default function StellaSidebar({
   const [userEmail, setUserEmail] = useState<string>('example@example.com');
   const [userInitial, setUserInitial] = useState<string>('?');
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -146,7 +148,7 @@ export default function StellaSidebar({
               }`}
               style={{ fontFamily: 'Garamond, serif', fontWeight: 570 }}
             >
-              Ask Stella<span className="text-red-500">!</span>
+              Ask Stella<span style={{ color: 'var(--stella-accent)' }}>!</span>
             </h3>
           </Link> )
         : (
@@ -182,7 +184,7 @@ export default function StellaSidebar({
               }}
             >
       <div className="flex items-center">
-          <div className={`h-6 w-6 mr-2 flex items-center justify-center bg-red-500 text-white rounded-full`}>
+          <div className="h-6 w-6 mr-2 flex items-center justify-center text-white rounded-full" style={{ backgroundColor: 'var(--stella-accent)' }}>
             <Plus className="h-4 w-4" />
           </div>
           {isSidebarExpanded && (
@@ -469,16 +471,10 @@ export default function StellaSidebar({
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="center" className="w-60">
             <DropdownMenuItem onClick={() => {
-              // Placeholder for settings functionality
+              setShowSettingsModal(true);
             }}>
               <Settings className="mr-2 h-4 w-4" />
               <span>Settings</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => {
-              // Placeholder for edit profile functionality
-            }}>
-              <User className="mr-2 h-4 w-4" />
-              <span>Edit Profile</span>
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => {
               setShowLogoutDialog(true);
@@ -489,6 +485,9 @@ export default function StellaSidebar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {/* Settings Modal */}
+      <SettingsModal open={showSettingsModal} onClose={() => setShowSettingsModal(false)} userName={userName} />
 
       {/* Logout Confirmation Dialog */}
       <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>

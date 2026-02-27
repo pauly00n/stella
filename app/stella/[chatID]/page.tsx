@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, Fragment } from 'react';
 import { useParams } from 'next/navigation';
+import { useTheme } from 'next-themes';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Card } from '@/components/ui/card';
@@ -13,6 +14,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { Message } from '@/lib/services/chat-service';
 
 function ChatPageContent({ chatID }: { chatID: string }) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
+
   useEffect(() => {
     console.log('[ChatPageContent] MOUNTED, chatID:', chatID);
     return () => console.log('[ChatPageContent] UNMOUNTED, chatID:', chatID);
@@ -97,9 +101,10 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                           style={{ marginRight: 'max(calc(100% - 500px - 25%), 3px)' }}
                         >
                           <Card
-                            className="px-4 py-3 bg-red-500/10 border-none max-w-[500px]"
+                            className="px-4 py-3 border-none max-w-[500px]"
+                            style={{ backgroundColor: isDark ? 'var(--stella-accent-text)' : 'var(--stella-accent-muted)' }}
                           >
-                            <div className="text-sm text-red-950 whitespace-pre-wrap">
+                            <div className="text-sm whitespace-pre-wrap" style={{ color: isDark ? 'rgba(255,255,255,0.85)' : 'var(--stella-accent-text)' }}>
                               {message.content}
                             </div>
                           </Card>

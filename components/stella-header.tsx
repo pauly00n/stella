@@ -1,3 +1,5 @@
+'use client';
+
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
@@ -10,14 +12,14 @@ export default function StellaHeader() {
             className="text-2xl font-normal text-foreground font-serif cursor-pointer select-none" 
             style={{ fontFamily: 'Garamond, serif', fontWeight: 570 }}
           >
-            Ask Stella<span className="text-red-500">!</span>
+            Ask Stella<span style={{ color: 'var(--stella-accent)' }}>!</span>
           </h1>
         </Link>
         <div className="flex items-center gap-4">
           <Button variant="ghost" asChild>
             <Link href="/stella/sign-up">Sign up</Link>
           </Button>
-          <Button variant="default" className="bg-red-500 hover:bg-red-600 text-white" asChild>
+          <Button variant="default" className="text-white" style={{ backgroundColor: 'var(--stella-accent)' }} asChild>
             <Link href="/stella/login">Login</Link>
           </Button>
         </div>

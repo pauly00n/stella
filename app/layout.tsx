@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { ThemeProvider } from '@/components/theme-provider';
+import { AccentProvider } from '@/components/accent-provider';
 import ConditionalLayout from '@/components/conditional-layout';
 
 export const metadata: Metadata = {
@@ -44,9 +45,11 @@ export default function RootLayout({
                     enableSystem
                     disableTransitionOnChange
                 >
-                    <ConditionalLayout>
-                        {children}
-                    </ConditionalLayout>
+                    <AccentProvider>
+                        <ConditionalLayout>
+                            {children}
+                        </ConditionalLayout>
+                    </AccentProvider>
                 </ThemeProvider>
             </body>
         </html>
