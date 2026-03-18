@@ -39,7 +39,7 @@ export function LoginForm({
       });
       if (error) throw error;
       // Use full page refresh to avoid transitions
-      window.location.href = "/stella";
+      window.location.href = "/";
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
     } finally {
@@ -88,7 +88,7 @@ export function LoginForm({
             <div className="mt-4 text-center text-sm">
               Don&apos;t have an account?{" "}
               <Link
-                href="/stella/sign-up"
+                href="/sign-up"
                 className="underline underline-offset-4"
               >
                 Sign up
@@ -96,7 +96,7 @@ export function LoginForm({
             </div>
             <div className="mt-2 text-center text-sm">
               <Link
-                href="/stella/forgot-password"
+                href="/forgot-password"
                 className="underline underline-offset-4"
               >
                 Forgot password?

@@ -284,7 +284,7 @@ export function useChatOrchestration({
 
     setImagesRequestStarted(true);
 
-    fetch("/stella/generate", {
+    fetch("/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -320,7 +320,7 @@ export function useChatOrchestration({
 
     setPapersRequestStarted(true);
 
-    fetch("/stella/generate", {
+    fetch("/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

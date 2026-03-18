@@ -88,7 +88,7 @@ export default function StellaSidebar({
   });
   
   // Extract current chatID from pathname
-  const currentChatID = pathname?.match(/\/stella\/([^\/]+)$/)?.[1];
+  const currentChatID = pathname?.match(/^\/([^\/]+)$/)?.[1];
 
   useEffect(() => {
     const supabase = createClient();
@@ -141,7 +141,7 @@ export default function StellaSidebar({
       <div className="flex justify-between items-center">
     <div className ={`pt-1 pb-0 ${isSidebarExpanded ? 'pl-0.5' : 'pl-1'} flex justify-start`}> {/* Some convoluted stuff to get Stella to display cleanly only when open*/}
         {isSidebarExpanded ? (
-          <Link href="/stella">
+          <Link href="/">
             <h3
               className={`text-2xl font-normal text-foreground px-3 py-2 overflow-hidden truncate transition-opacity duration-300 font-serif cursor-pointer select-none ${
                 isSidebarExpanded ? 'opacity-100' : 'opacity-0'
@@ -175,12 +175,12 @@ export default function StellaSidebar({
 
 
       {/* New Question Button */}
-    <div className={`justify-start ${isSidebarExpanded ? 'px-2' : 'px-1'}`}>
+    <div className="justify-start px-2">
         <Button
               variant="ghost"
-              className={`w-full h-10 justify-start hover:${BUTTON_HOVER_COLOR} focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${isSidebarExpanded ? 'pr-3 pl-1' : 'pr-2 pl-2'}`}
+              className={`w-full h-10 justify-start hover:${BUTTON_HOVER_COLOR} focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none pr-3 pl-1`}
               onClick={() => {
-                router.push('/stella');
+                router.push('/');
               }}
             >
       <div className="flex items-center">
@@ -200,10 +200,10 @@ export default function StellaSidebar({
 
 
       {/* Search Chats Button */}
-    <div className={`pb-2 justify-start ${isSidebarExpanded ? 'px-2' : 'px-1'}`}>
+    <div className="pb-2 justify-start px-2">
     <Button
           variant="ghost"
-          className={`w-full h-10 justify-start hover:${BUTTON_HOVER_COLOR} focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${isSidebarExpanded ? 'pr-2 pl-0' : 'pr-1 pl-1'}`}
+          className={`w-full h-10 justify-start hover:${BUTTON_HOVER_COLOR} focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none pr-2 pl-0`}
           onClick={() => {
             // Placeholder for new question functionality
           }}
@@ -278,13 +278,13 @@ export default function StellaSidebar({
                 return (
                   <div
                     key={chat.chat_id}
-                    className={`w-full flex justify-between items-center text-left h-auto py-2 px-2 ${isSidebarExpanded ? `hover:${BUTTON_HOVER_COLOR}` : ''} group relative rounded-md transition-colors ${
-                      isActive && isSidebarExpanded ? 'bg-muted/90' : ''
+                    className={`w-full flex justify-between items-center text-left h-auto py-2 px-2 hover:${BUTTON_HOVER_COLOR} group relative rounded-md transition-colors ${
+                      isActive ? 'bg-muted/90' : ''
                     }`}
                   >
                     {isSidebarExpanded && !isEditing && (
                       <Link
-                        href={`/stella/${chat.chat_id}`}
+                        href={`/${chat.chat_id}`}
                         className="absolute inset-0 z-10 rounded-md"
                         aria-label={chat.title || 'Untitled chat'}
                       />
@@ -504,7 +504,7 @@ export default function StellaSidebar({
               onClick={async () => {
                 const supabase = createClient();
                 await supabase.auth.signOut();
-                router.push('/stella/login');
+                router.push('/login');
               }}
               className="bg-red-500 hover:bg-red-600 text-white"
             >
@@ -537,9 +537,9 @@ export default function StellaSidebar({
                   await deleteChat(deletingChatId);
                   setSidebarError(null);
                   await refetchChats();
-                  // If the deleted chat was the active one, redirect to /stella
+                  // If the deleted chat was the active one, redirect to /
                   if (currentChatID === deletingChatId) {
-                    router.push('/stella');
+                    router.push('/');
                   }
                   setShowDeleteDialog(false);
                   setDeletingChatId(null);

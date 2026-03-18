@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
   const clientIp = forwardedFor.split(',')[0]?.trim() || 'unknown';
   const logger = createRequestLogger({
     requestId,
-    route: '/stella/generate',
+    route: '/generate',
     clientIp,
   });
 

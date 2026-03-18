@@ -1,10 +1,10 @@
 export const AUTH_ROUTES = {
-  home: "/stella",
-  login: "/stella/login",
-  signUp: "/stella/sign-up",
-  forgotPassword: "/stella/forgot-password",
-  updatePassword: "/stella/update-password",
-  error: "/stella/error",
+  home: "/",
+  login: "/login",
+  signUp: "/sign-up",
+  forgotPassword: "/forgot-password",
+  updatePassword: "/update-password",
+  error: "/error",
 } as const;
 
 export function sanitizeNextPath(nextPath: string | null | undefined): string {

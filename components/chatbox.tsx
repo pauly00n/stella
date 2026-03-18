@@ -66,11 +66,11 @@ export function Chatbox() {
         sessionStorage.setItem(PENDING_GENERATION_KEY, JSON.stringify(pendingGeneration));
 
         // Redirect — chat page will read sessionStorage and start the stream
-        window.location.href = `/stella/${chat.chat_id}`;
+        window.location.href = `/${chat.chat_id}`;
       } catch (error) {
         if (error instanceof Error && error.message === 'User not authenticated') {
           // If there is no auth session, send the user to login.
-          router.push('/stella/login');
+          router.push('/login');
           return;
         }
         setError(error instanceof Error ? error.message : 'Failed to send message. Please try again.');
@@ -143,7 +143,8 @@ export function Chatbox() {
   };
 
   return (
-    <Card 
+    <>
+    <Card
       className="w-full border border-border/40 bg-card/80 shadow-xl relative transition-all duration-200"
       style={{
         transform: isFocused ? 'scale(1.001)' : 'scale(1)',
@@ -243,5 +244,9 @@ export function Chatbox() {
         {error && <p className="px-2 pb-2 text-sm text-red-500">{error}</p>}
       </CardContent>
     </Card>
+    <p className="text-xs text-muted-foreground text-center mt-2">
+      NOT for clinical use. Educational discussion only. Stanford MSK AI 2025 / Do, Yoon, Beaulieu.
+    </p>
+    </>
   );
 }

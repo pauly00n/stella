@@ -149,7 +149,7 @@ export type StreamGenerateEvent =
   | { error: string };
 
 /**
- * Calls POST /stella/generate with operation='response' and reads the SSE stream.
+ * Calls POST /generate with operation='response' and reads the SSE stream.
  * Yields typed events: first a placeholderMessageId, then chunk strings, then done/error.
  */
 export async function* streamGenerate(params: {
@@ -159,7 +159,7 @@ export async function* streamGenerate(params: {
   showImages: boolean;
   idempotencyKey: string;
 }): AsyncGenerator<StreamGenerateEvent, void, unknown> {
-  const response = await fetch('/stella/generate', {
+  const response = await fetch('/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ operation: 'response', ...params }),

@@ -5,7 +5,7 @@ import {
     CardTitle,
   } from "@/components/ui/card";
 import Link from "next/link";
-  
+
   export default function Page() {
     return (
       <div className="flex h-full w-full items-center justify-center p-6 md:p-10">
@@ -20,10 +20,10 @@ import Link from "next/link";
               <CardContent>
                 <p className="text-sm text-muted-foreground">
                   Please{" "}
-                  <Link href="/stella/login" className="underline underline-offset-2">
+                  <Link href="/login" className="underline underline-offset-2">
                     log in
                   </Link> with the existing account, or{" "}
-                  <Link href="/stella/sign-up" className="underline underline-offset-2">
+                  <Link href="/sign-up" className="underline underline-offset-2">
                     sign up
                   </Link> with a different email address.
                 </p>

@@ -9,9 +9,9 @@ const PUBLIC_STELLA_ROUTES = new Set<string>([
   AUTH_ROUTES.forgotPassword,
   AUTH_ROUTES.updatePassword,
   AUTH_ROUTES.error,
-  "/stella/sign-up-success",
-  "/stella/sign-up-exists",
-  "/stella/confirm",
+  "/sign-up-success",
+  "/sign-up-exists",
+  "/confirm",
 ]);
 
 const AUTH_ENTRY_ROUTES = new Set<string>([
@@ -21,7 +21,7 @@ const AUTH_ENTRY_ROUTES = new Set<string>([
 ]);
 
 function isStellaPath(pathname: string): boolean {
-  return pathname === "/stella" || pathname.startsWith("/stella/");
+  return !pathname.startsWith("/api/");
 }
 
 export async function updateSession(request: NextRequest) {
@@ -62,7 +62,7 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Keep API auth behavior in the route handler itself (JSON 401), not middleware redirects.
-  if (pathname === "/stella/generate") {
+  if (pathname === "/generate") {
     return supabaseResponse;
   }
 

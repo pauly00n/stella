@@ -75,7 +75,7 @@ export function SignUpForm({
             errorMessage.includes('user with this email address has already been registered') ||
             errorCode === 422 ||
             errorCode === '422') {
-          router.push("/stella/sign-up-exists");
+          router.push("/sign-up-exists");
           return;
         }
         throw error;
@@ -96,12 +96,12 @@ export function SignUpForm({
           signInError.message?.toLowerCase().includes('incorrect password') ||
           signInError.message?.toLowerCase().includes('email not confirmed')
         )) {
-          router.push("/stella/sign-up-exists");
+          router.push("/sign-up-exists");
           return;
         }
       }
       
-      router.push("/stella/sign-up-success");
+      router.push("/sign-up-success");
     } catch (error: unknown) {
       // If it's a Supabase error, check it again
       if (error && typeof error === 'object' && 'message' in error) {
@@ -112,7 +112,7 @@ export function SignUpForm({
             errorMessage.includes('email address is already registered') ||
             errorMessage.includes('email already registered') ||
             errorMessage.includes('invalid login credentials')) {
-          router.push("/stella/sign-up-exists");
+          router.push("/sign-up-exists");
           return;
         }
       }
@@ -173,7 +173,7 @@ export function SignUpForm({
             </div>
             <div className="mt-4 text-center text-sm">
               Already have an account?{" "}
-              <Link href="/stella/login" className="underline underline-offset-4">
+              <Link href="/login" className="underline underline-offset-4">
                 Login
               </Link>
             </div>
