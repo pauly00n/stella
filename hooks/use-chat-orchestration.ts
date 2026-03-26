@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getChatById, streamGenerate, type Chat, type Message } from "@/lib/services/chat-service";
-import { PENDING_GENERATION_KEY, type PendingGeneration } from "@/components/chatbox";
+import { getChatById, streamGenerate, type Chat, type Message, type TaskType } from "@/lib/services/chat-service";
 import { MessageMetaSchema, type MessageMeta, type DifferentialGroup, type ImageMeta } from "@/lib/schemas/chat";
 
 type ThinkingPhase = "analyzing" | "generating" | "searching" | null;
@@ -10,64 +9,49 @@ function getMessageMeta(meta: unknown): MessageMeta {
   return parsed.success ? parsed.data : {};
 }
 
-// Module-level store so streaming content survives component remounts.
-// Key = chatId, value = accumulated text so far.
+// Module-level store so streaming content survives client-side navigations.
 const streamingStore: Map<string, string> = new Map();
-// Listeners registered by hook instances to receive updates.
 const streamingListeners: Map<string, Set<(text: string) => void>> = new Map();
 
 function notifyListeners(chatId: string, text: string) {
   streamingListeners.get(chatId)?.forEach((fn) => fn(text));
 }
 
-// Kick off the SSE stream immediately when sessionStorage has a pending
-// generation — before any component mounts. This way remounts don't lose data.
-function startStreamIfPending() {
-  if (typeof window === 'undefined') return;
-  const raw = sessionStorage.getItem(PENDING_GENERATION_KEY);
-  if (!raw) return;
-  let params: PendingGeneration;
-  try { params = JSON.parse(raw) as PendingGeneration; } catch { return; }
-  // Already started for this chat
+/**
+ * Starts an SSE stream for a chat. Runs in module scope so it survives
+ * component unmounts during client-side navigation.
+ */
+export function startStreamForChat(params: {
+  chatId: string;
+  draft: string;
+  mode: TaskType;
+  showImages: boolean;
+  idempotencyKey: string;
+}) {
   if (streamingStore.has(params.chatId)) return;
-
-  sessionStorage.removeItem(PENDING_GENERATION_KEY);
   streamingStore.set(params.chatId, '');
 
   (async () => {
     try {
-      console.log('[client] starting streamGenerate for', params.chatId);
       for await (const event of streamGenerate(params)) {
         if ('chunk' in event) {
           const prev = streamingStore.get(params.chatId) ?? '';
           const next = prev + event.chunk;
           streamingStore.set(params.chatId, next);
-          console.log('[client] chunk arrived, len:', event.chunk.length, 'time:', Date.now());
           notifyListeners(params.chatId, next);
-        } else if ('placeholderMessageId' in event) {
-          console.log('[client] placeholderMessageId received');
         } else if ('done' in event) {
-          console.log('[client] done event');
-          // Listeners will trigger refetch via the hook
           notifyListeners(params.chatId, '__done__');
         } else if ('error' in event) {
-          console.log('[client] error event:', (event as { error: string }).error);
           streamingStore.delete(params.chatId);
           notifyListeners(params.chatId, '__error__');
         }
       }
-      console.log('[client] stream loop ended');
     } catch (e) {
       console.error('[orchestration] stream error:', e);
       streamingStore.delete(params.chatId);
       notifyListeners(params.chatId, '__error__');
     }
   })();
-}
-
-// Start immediately on module load (client only)
-if (typeof window !== 'undefined') {
-  startStreamIfPending();
 }
 
 export function useChatOrchestration({
@@ -284,11 +268,10 @@ export function useChatOrchestration({
 
     setImagesRequestStarted(true);
 
-    fetch("/generate", {
+    fetch("/api/stella/generate/images", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        operation: "images",
         chatId: chatID,
         draft: latestAssistantMessage.content,
         showImages: true,
@@ -320,11 +303,10 @@ export function useChatOrchestration({
 
     setPapersRequestStarted(true);
 
-    fetch("/generate", {
+    fetch("/api/stella/generate/papers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        operation: "papers",
         chatId: chatID,
         draft: latestAssistantMessage.content,
         messageId: latestAssistantMessage.message_id,
@@ -341,7 +323,7 @@ export function useChatOrchestration({
 
     const interval = setInterval(() => {
       refetch({ silent: true }).catch(() => {});
-    }, realtimeConnected ? 2500 : 2000);
+    }, realtimeConnected ? 15000 : 2000);
 
     return () => clearInterval(interval);
   }, [shouldShowPendingAssistant, shouldShowSearchingImages, realtimeConnected, refetch]);

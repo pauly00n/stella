@@ -1,4 +1,4 @@
-type RateLimitScope = "generate:response" | "generate:images";
+type RateLimitScope = "generate:response" | "generate:images" | "generate:papers";
 
 interface RateLimitOptions {
   scope: RateLimitScope;

@@ -4,6 +4,7 @@
  */
 import { serverEnv } from '@/lib/env/server';
 import { createRequestLogger } from '@/lib/observability/logger';
+import type { Json } from '@/lib/supabase/database.types';
 
 const GEMINI_API_KEY = serverEnv.GEMINI_API_KEY;
 const SEARCH_API_KEY = serverEnv.SEARCH_API_KEY || '';
@@ -127,18 +128,23 @@ export interface ImageResult {
   link: string;
   displayLink: string;
   snippet: string;
-  image: {
-    contextLink: string;
-    thumbnailLink: string;
-    width: number;
-    height: number;
-  };
+  image: ImagePayload;
+  [key: string]: Json | undefined;
+}
+
+export interface ImagePayload {
+  contextLink: string;
+  thumbnailLink: string;
+  width: number;
+  height: number;
+  [key: string]: Json | undefined;
 }
 
 export interface DifferentialImageGroup {
   differentialName: string;
   searchQuery: string;
   images: ImageResult[];
+  [key: string]: Json | undefined;
 }
 
 export interface ImageGenerationResult {
@@ -370,11 +376,13 @@ export interface PaperResult {
   title: string;
   authors: string;
   url: string;
+  [key: string]: Json | undefined;
 }
 
 export interface DiagnosisPaperGroup {
   diagnosisName: string;
   paper: PaperResult | null;
+  [key: string]: Json | undefined;
 }
 
 export interface PaperGenerationResult {

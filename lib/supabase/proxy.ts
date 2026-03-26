@@ -61,11 +61,6 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // Keep API auth behavior in the route handler itself (JSON 401), not middleware redirects.
-  if (pathname === "/generate") {
-    return supabaseResponse;
-  }
-
   const {
     data: { user },
   } = await supabase.auth.getUser();

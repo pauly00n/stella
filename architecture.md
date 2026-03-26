@@ -53,7 +53,7 @@ The architecture is mostly BFF-style (frontend + backend in one Next.js codebase
 ### 3.2 Layout Composition
 
 - `app/layout.tsx` applies global theme + conditional header/footer for non-Stella pages.
-- Stella routes bypass global header/footer via `components/conditional-layout.tsx`.
+- Stella layout is handled entirely by `components/stella-layout-shell.tsx`.
 - `components/stella-layout-shell.tsx` performs client-side auth check:
   - Unauthenticated: shows `StellaHeader` and content
   - Authenticated: shows `StellaSidebar` + main content area

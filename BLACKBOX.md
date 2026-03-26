@@ -85,7 +85,7 @@ components/
   stella-layout-shell.tsx       # Client-side auth check → sidebar or header
   stella-sidebar.tsx            # Authenticated sidebar (chat list)
   stella-header.tsx             # Unauthenticated header
-  conditional-layout.tsx        # Hides global header/footer on /stella/* routes
+  # conditional-layout.tsx removed — layout handled by stella-layout-shell.tsx
   chat-loading-skeleton.tsx     # Loading state for chat view
   login-form.tsx, sign-up-form.tsx, forgot-password-form.tsx, update-password-form.tsx
   ui/                           # shadcn/ui primitives (do not edit manually)

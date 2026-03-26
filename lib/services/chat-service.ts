@@ -159,10 +159,10 @@ export async function* streamGenerate(params: {
   showImages: boolean;
   idempotencyKey: string;
 }): AsyncGenerator<StreamGenerateEvent, void, unknown> {
-  const response = await fetch('/generate', {
+  const response = await fetch('/api/stella/generate/response', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ operation: 'response', ...params }),
+    body: JSON.stringify(params),
   });
 
   if (!response.ok) {

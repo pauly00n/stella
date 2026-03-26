@@ -1,20 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthenticatedUser } from "@/lib/supabase/auth";
 import { UpdateChatTitleBodySchema } from "@/lib/schemas/chat";
 import { createRequestLogger } from "@/lib/observability/logger";
-
-async function getAuthenticatedUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) {
-    return { supabase, user: null as null };
-  }
-  return { supabase, user };
-}
 
 export async function GET(
   request: NextRequest,
@@ -111,25 +98,15 @@ export async function DELETE(
     return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
   }
 
-  const { error: messagesError } = await supabase
-    .from("messages")
-    .delete()
-    .eq("chat_id", chatID)
-    .eq("user_id", user.id);
-
-  if (messagesError) {
-    logger.error("chat.delete_messages_failed", messagesError, { userId: user.id, chatId: chatID });
-    return NextResponse.json({ ok: false, error: "Failed to delete chat messages" }, { status: 500 });
-  }
-
-  const { error: chatError } = await supabase
+  // Relies on ON DELETE CASCADE on the messages.chat_id FK
+  const { error } = await supabase
     .from("chats")
     .delete()
     .eq("chat_id", chatID)
     .eq("user_id", user.id);
 
-  if (chatError) {
-    logger.error("chat.delete_failed", chatError, { userId: user.id, chatId: chatID });
+  if (error) {
+    logger.error("chat.delete_failed", error, { userId: user.id, chatId: chatID });
     return NextResponse.json({ ok: false, error: "Failed to delete chat" }, { status: 500 });
   }
 

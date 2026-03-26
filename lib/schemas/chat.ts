@@ -41,26 +41,33 @@ export const ImageMetaSchema = z
         width: z.number().optional(),
         height: z.number().optional(),
       })
+      .catchall(z.any())
       .optional(),
   })
-  .passthrough();
+  .catchall(z.any());
 
-export const DifferentialGroupSchema = z.object({
-  differentialName: z.string(),
-  searchQuery: z.string(),
-  images: z.array(ImageMetaSchema),
-});
+export const DifferentialGroupSchema = z
+  .object({
+    differentialName: z.string(),
+    searchQuery: z.string(),
+    images: z.array(ImageMetaSchema),
+  })
+  .catchall(z.any());
 
-export const PaperResultSchema = z.object({
-  title: z.string(),
-  authors: z.string(),
-  url: z.string(),
-});
+export const PaperResultSchema = z
+  .object({
+    title: z.string(),
+    authors: z.string(),
+    url: z.string(),
+  })
+  .catchall(z.any());
 
-export const DiagnosisPaperGroupSchema = z.object({
-  diagnosisName: z.string(),
-  paper: PaperResultSchema.nullable(),
-});
+export const DiagnosisPaperGroupSchema = z
+  .object({
+    diagnosisName: z.string(),
+    paper: PaperResultSchema.nullable(),
+  })
+  .catchall(z.any());
 
 export const MessageMetaSchema = z
   .object({
@@ -69,7 +76,7 @@ export const MessageMetaSchema = z
       .optional(),
     // Accept any array — could be legacy flat ImageResult[] or new DifferentialGroup[].
     // The hook normalizes the format at read time.
-    images: z.array(z.unknown()).optional(),
+    images: z.array(z.any()).optional(),
     papers: z.array(DiagnosisPaperGroupSchema).optional(),
     task: InternalTaskSchema.nullable().optional(),
     latencyMs: z.number().optional(),
@@ -77,7 +84,7 @@ export const MessageMetaSchema = z
     imageQuery: z.string().optional(),
     idempotencyKey: z.string().optional(),
   })
-  .passthrough();
+  .catchall(z.any());
 
 export const CreateChatBodySchema = z.object({
   messageContent: z.string().trim().min(1),
@@ -91,12 +98,12 @@ export const UpdateChatTitleBodySchema = z.object({
 export const GenerateOperationSchema = z.enum(["response", "images", "papers"]);
 
 export const GenerateForChatBodySchema = z.object({
-  chatId: z.string().trim().min(1),
+  chatId: z.string().trim().uuid(),
   operation: GenerateOperationSchema.optional(),
   draft: z.string().max(5000).optional(),
   mode: TaskTypeSchema.optional(),
   showImages: z.boolean().optional(),
-  messageId: z.string().optional(),
+  messageId: z.string().uuid().optional(),
   idempotencyKey: z.string().trim().min(1).optional(),
 });
 

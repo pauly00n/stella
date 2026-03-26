@@ -15,16 +15,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { createChatWithMessage, type TaskType } from '@/lib/services/chat-service';
-
-export interface PendingGeneration {
-  chatId: string;
-  draft: string;
-  mode: TaskType;
-  showImages: boolean;
-  idempotencyKey: string;
-}
-
-export const PENDING_GENERATION_KEY = 'stella:pendingGeneration';
+import { startStreamForChat } from '@/hooks/use-chat-orchestration';
 
 export function Chatbox() {
   const [message, setMessage] = useState('');
@@ -55,18 +46,15 @@ export function Chatbox() {
           textareaRef.current.style.height = `${MIN_HEIGHT}px`;
         }
 
-        // Store generation params for the chat page to pick up and stream
-        const pendingGeneration: PendingGeneration = {
+        startStreamForChat({
           chatId: chat.chat_id,
           draft: trimmed,
           mode: task,
           showImages: showImages === 'On',
           idempotencyKey: crypto.randomUUID(),
-        };
-        sessionStorage.setItem(PENDING_GENERATION_KEY, JSON.stringify(pendingGeneration));
+        });
 
-        // Redirect — chat page will read sessionStorage and start the stream
-        window.location.href = `/${chat.chat_id}`;
+        router.push(`/${chat.chat_id}`);
       } catch (error) {
         if (error instanceof Error && error.message === 'User not authenticated') {
           // If there is no auth session, send the user to login.
@@ -177,7 +165,7 @@ export function Chatbox() {
           <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
             <DropdownMenuTrigger asChild>
               <Button
-                className="h-9 px-3 rounded-full bg-white hover:bg-gray-50 text-gray-600 border border-gray-300 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                className="h-9 px-3 rounded-full bg-background hover:bg-muted text-muted-foreground border border-border text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
               >
                 {task} {isDropdownOpen ? <ChevronUp className="h-4 w-4 ml-1" /> : <ChevronDown className="h-4 w-4 ml-1" />}
               </Button>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, Fragment } from 'react';
+import { useEffect, Fragment } from 'react';
 import { useParams } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import ReactMarkdown from 'react-markdown';
@@ -11,16 +11,10 @@ import { useChatOrchestration } from '@/hooks/use-chat-orchestration';
 import { useScrollbarVisibility } from '@/hooks/use-scrollbar-visibility';
 import { ChatLoadingSkeleton } from '@/components/chat-loading-skeleton';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { Message } from '@/lib/services/chat-service';
 
 function ChatPageContent({ chatID }: { chatID: string }) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
-
-  useEffect(() => {
-    console.log('[ChatPageContent] MOUNTED, chatID:', chatID);
-    return () => console.log('[ChatPageContent] UNMOUNTED, chatID:', chatID);
-  }, [chatID]);
 
   const { messages, loading, error, refetch, realtimeConnected } = useMessages(chatID);
   const {
@@ -84,14 +78,12 @@ function ChatPageContent({ chatID }: { chatID: string }) {
               </div>
             ) : (
               <>
-                {messages.map((message, index) => {
-                  const isUserMessage = message.role === 'user';
-                  // Find the index of the last user message
-                  const lastUserMessageIndex = messages.map((m, i) => ({ role: m.role, index: i }))
-                    .filter(({ role }) => role === 'user')
-                    .pop()?.index ?? -1;
-                  const isLastUserMessage = isUserMessage && index === lastUserMessageIndex;
+                {(() => {
+                  const lastUserMessageIndex = messages.reduce((last, m, i) => m.role === 'user' ? i : last, -1);
                   const hasAssistantMessages = messages.some((m) => m.role !== 'user');
+                  return messages.map((message, index) => {
+                  const isUserMessage = message.role === 'user';
+                  const isLastUserMessage = isUserMessage && index === lastUserMessageIndex;
                   
                   return (
                     <Fragment key={message.message_id}>
@@ -183,11 +175,11 @@ function ChatPageContent({ chatID }: { chatID: string }) {
                       )}
                     </Fragment>
                   );
-                })}
+                });
+                })()}
 
                 {shouldShowPendingAssistant && (
                   <div className="pt-10 max-w-[650px] w-full">
-                    {void console.log('[render] shouldShowPendingAssistant=true streamingContent.len=', streamingContent?.length ?? 0)}
                     {/* Thinking phase label — shown only during the auto-mode task analysis phase */}
                     {thinkingPhase === 'analyzing' && !streamingContent && (
                       <div className="mb-3">
@@ -290,23 +282,8 @@ function ChatPageContent({ chatID }: { chatID: string }) {
 }
 
 export default function ChatPage() {
-  const [mounted, setMounted] = useState(false);
   const params = useParams();
-  
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Only access params after mounting to avoid SSR issues
-  const chatID = useMemo(() => {
-    if (!mounted || typeof window === 'undefined') return undefined;
-    return params?.chatID as string | undefined;
-  }, [mounted, params]);
-
-  // While mounting on the client, show the same skeleton layout for a seamless transition.
-  if (!mounted) {
-    return <ChatLoadingSkeleton />;
-  }
+  const chatID = params?.chatID as string | undefined;
 
   if (!chatID) {
     return (

@@ -3,13 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import type { User } from '@supabase/supabase-js';
 import { Button } from '@/components/ui/button';
-import { PanelLeftOpen, PanelLeft, PanelRightOpen, Plus, Search, MessageSquare, Settings, User, LogOut, ChevronDown, ChevronUp, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { PanelLeft, PanelRightOpen, Plus, Search, Settings, LogOut, ChevronDown, ChevronUp, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import SettingsModal from '@/components/settings-modal';
 import { createClient } from '@/lib/supabase/client';
 import { useChats } from '@/hooks/use-chats';
 import { useScrollbarVisibility } from '@/hooks/use-scrollbar-visibility';
-import type { Chat } from '@/lib/services/chat-service';
 import { updateChatTitle, deleteChat } from '@/lib/services/chat-service';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -33,27 +33,18 @@ const BUTTON_HOVER_COLOR = 'bg-muted';
 
 export default function StellaSidebar({ 
   isExpanded, 
-  onExpandedChange 
+  onExpandedChange,
+  user,
 }: { 
-  isExpanded?: boolean; 
-  onExpandedChange?: (expanded: boolean) => void;
+  isExpanded: boolean; 
+  onExpandedChange: (expanded: boolean) => void;
+  user: User;
 }) {
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(isExpanded ?? true);
-  
-  useEffect(() => {
-    if (isExpanded !== undefined) {
-      setIsSidebarExpanded(isExpanded);
-    }
-  }, [isExpanded]);
-  
-  const handleToggle = () => {
-    const newValue = !isSidebarExpanded;
-    setIsSidebarExpanded(newValue);
-    onExpandedChange?.(newValue);
-  };
-  const [userName, setUserName] = useState<string>('example');
-  const [userEmail, setUserEmail] = useState<string>('example@example.com');
-  const [userInitial, setUserInitial] = useState<string>('?');
+  const handleToggle = () => onExpandedChange(!isExpanded);
+
+  const userName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || user.email || 'User';
+  const userEmail = user.email || '';
+  const userInitial = userName.charAt(0).toUpperCase();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
@@ -83,50 +74,12 @@ export default function StellaSidebar({
   
   // Use scrollbar visibility hook
   const { scrollbarProps } = useScrollbarVisibility({
-    isExpanded: isSidebarExpanded,
+    isExpanded: isExpanded,
     trackHover: false,
   });
   
   // Extract current chatID from pathname
   const currentChatID = pathname?.match(/^\/([^\/]+)$/)?.[1];
-
-  useEffect(() => {
-    const supabase = createClient();
-    
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        // Try to get display name from user_metadata, otherwise use email
-        const displayName = user.user_metadata?.full_name || 
-                           user.user_metadata?.name || 
-                           user.email?.split('@')[0] || 
-                           user.email || 
-                           'User';
-        setUserName(displayName);
-        setUserEmail(user.email || '');
-        setUserInitial(displayName.charAt(0).toUpperCase());
-      }
-    };
-
-    getUser();
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        const displayName = session.user.user_metadata?.full_name || 
-                           session.user.user_metadata?.name || 
-                           session.user.email?.split('@')[0] || 
-                           session.user.email || 
-                           'User';
-        setUserName(displayName);
-        setUserEmail(session.user.email || '');
-        setUserInitial(displayName.charAt(0).toUpperCase());
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
 
   // Fetch user's chats
   const { chats, loading: chatsLoading, error: chatsError, refetch: refetchChats } = useChats();
@@ -134,17 +87,17 @@ export default function StellaSidebar({
   return (
     <div
       className={`fixed left-0 top-0 bg-card border-r border-border transition-[width] duration-200 flex flex-col overflow-hidden h-screen z-10 ${
-        isSidebarExpanded ? 'w-64' : 'w-12'
+        isExpanded ? 'w-64' : 'w-12'
       }`}
     >
       {/* Expansion Button */}
       <div className="flex justify-between items-center">
-    <div className ={`pt-1 pb-0 ${isSidebarExpanded ? 'pl-0.5' : 'pl-1'} flex justify-start`}> {/* Some convoluted stuff to get Stella to display cleanly only when open*/}
-        {isSidebarExpanded ? (
+    <div className ={`pt-1 pb-0 ${isExpanded ? 'pl-0.5' : 'pl-1'} flex justify-start`}> {/* Some convoluted stuff to get Stella to display cleanly only when open*/}
+        {isExpanded ? (
           <Link href="/">
             <h3
               className={`text-2xl font-normal text-foreground px-3 py-2 overflow-hidden truncate transition-opacity duration-300 font-serif cursor-pointer select-none ${
-                isSidebarExpanded ? 'opacity-100' : 'opacity-0'
+                isExpanded ? 'opacity-100' : 'opacity-0'
               }`}
               style={{ fontFamily: 'Garamond, serif', fontWeight: 570 }}
             >
@@ -155,14 +108,14 @@ export default function StellaSidebar({
             <h3 className='text-2xl font-light text-muted-foreground py-2 overflow-hidden opacity-0'>​ </h3>
         )}
         </div>
-      <div className={`flex justify-end ${isSidebarExpanded ? 'pr-2 py-3' : 'pr-3 py-3 pb-3'}`}>
+      <div className={`flex justify-end py-3 ${isExpanded ? 'pr-2' : 'pr-3'}`}>
         <Button
           variant="ghost"
           size="icon"
               onClick={handleToggle}
           className={`w-10 h-10 justify-center hover:${BUTTON_HOVER_COLOR} focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none`}
         >
-          {isSidebarExpanded ? (
+          {isExpanded ? (
             <>
               <PanelRightOpen className="h-5 w-5 m-2 flex-shrink-0" />
             </>
@@ -187,7 +140,7 @@ export default function StellaSidebar({
           <div className="h-6 w-6 mr-2 flex items-center justify-center text-white rounded-full" style={{ backgroundColor: 'var(--stella-accent)' }}>
             <Plus className="h-4 w-4" />
           </div>
-          {isSidebarExpanded && (
+          {isExpanded && (
           <h3
             className={`text-base font-normal text-muted-foreground overflow-hidden truncate transition-opacity duration-300`}
           >
@@ -212,7 +165,7 @@ export default function StellaSidebar({
           <div className={`h-8 w-8 mr-1 flex items-center justify-center`}>
             <Search className="h-5 w-5" />
           </div>
-          {isSidebarExpanded && (
+          {isExpanded && (
           <h3
             className={`text-base font-normal text-muted-foreground overflow-hidden truncate transition-opacity duration-300`}
           >
@@ -229,12 +182,12 @@ export default function StellaSidebar({
       <div className="flex-1 flex flex-col min-h-0">
         <h3
           className={`text-sm font-medium text-muted-foreground px-4 pt-4 pb-1 overflow-hidden truncate transition-opacity duration-300 flex-shrink-0 ${
-            isSidebarExpanded ? 'opacity-100' : 'opacity-0'
+            isExpanded ? 'opacity-100' : 'opacity-0'
           }`}
         >
           Recent chats
         </h3>
-        {isSidebarExpanded && (sidebarError || chatsError) && (
+        {isExpanded && (sidebarError || chatsError) && (
           <div className="px-4 pb-1 text-xs text-red-500 truncate">
             {sidebarError || chatsError}
           </div>
@@ -257,17 +210,17 @@ export default function StellaSidebar({
                   >
                     <Skeleton
                       className={`h-5 rounded transition-all duration-500 ${
-                        isSidebarExpanded ? `opacity-100` : 'w-0 opacity-0'
+                        isExpanded ? `opacity-100` : 'w-0 opacity-0'
                       }`}
                       style={{
-                        width: isSidebarExpanded ? `${width}%` : '0%'
+                        width: isExpanded ? `${width}%` : '0%'
                       }}
                     />
                   </div>
                 );
               })
             ) : chats.length === 0 ? (
-              <div className={`text-center text-muted-foreground text-sm py-4 ${isSidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
+              <div className={`text-center text-muted-foreground text-sm py-4 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>
                 No chats yet
               </div>
             ) : (
@@ -278,11 +231,11 @@ export default function StellaSidebar({
                 return (
                   <div
                     key={chat.chat_id}
-                    className={`w-full flex justify-between items-center text-left h-auto py-2 px-2 hover:${BUTTON_HOVER_COLOR} group relative rounded-md transition-colors ${
-                      isActive ? 'bg-muted/90' : ''
-                    }`}
+                    className={`w-full flex justify-between items-center text-left h-auto py-2 px-2 group relative rounded-md transition-colors ${
+                      isExpanded ? `hover:${BUTTON_HOVER_COLOR}` : ''
+                    } ${isActive && isExpanded ? 'bg-muted/90' : ''}`}
                   >
-                    {isSidebarExpanded && !isEditing && (
+                    {isExpanded && !isEditing && (
                       <Link
                         href={`/${chat.chat_id}`}
                         className="absolute inset-0 z-10 rounded-md"
@@ -368,14 +321,14 @@ export default function StellaSidebar({
                       ) : (
                         <span
                           className={`text-sm truncate transition-all duration-300 overflow-hidden block ${
-                            isSidebarExpanded ? 'opacity-100 max-w-[190px]' : 'opacity-0 max-w-0'
+                            isExpanded ? 'opacity-100 max-w-[190px]' : 'opacity-0 max-w-0'
                           }`}
                         >
                           {chat.title || 'Untitled chat'}
                         </span>
                       )}
                     </div>
-                    {isSidebarExpanded && (
+                    {isExpanded && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -433,18 +386,18 @@ export default function StellaSidebar({
       </div>
 
       {/* Profile */}
-      <div className={`${isSidebarExpanded ? 'border-t border-border pt-0' : 'pt-3'}`}>
+      <div className="border-t border-border">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              className={`w-full ${isSidebarExpanded ? 'h-16' : 'h-16'} justify-start px-1 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none hover:${BUTTON_HOVER_COLOR}`}
+              className={`w-full ${isExpanded ? 'h-16' : 'h-16'} justify-start px-1 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none hover:${BUTTON_HOVER_COLOR}`}
             >
-              <div className={`flex items-center w-full ${isSidebarExpanded ? 'pl-3' : ''} transition-all duration-300`}>
+              <div className={`flex items-center w-full ${isExpanded ? 'pl-3' : ''} transition-all duration-300`}>
                 <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
                   <span className="text-lg font-semibold text-foreground">{userInitial}</span>
                 </div>
-                {isSidebarExpanded && (
+                {isExpanded && (
                   <>
                     <div className="flex flex-col pl-2 min-w-0 items-start">
                       <h3

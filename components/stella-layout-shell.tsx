@@ -7,16 +7,21 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
-function getInitialSidebarExpanded(): boolean {
-  if (typeof window === 'undefined') return true;
-  const saved = localStorage.getItem('stella-sidebar-expanded');
-  return saved !== null ? saved === 'true' : true;
-}
-
 export function StellaLayoutShell({ children }: { children: React.ReactNode }) {
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(getInitialSidebarExpanded);
+  // IMPORTANT: Client Components are still SSR-rendered for the initial HTML.
+  // Keep the first render deterministic between server and client to avoid
+  // hydration mismatches (e.g. from `localStorage`).
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
+  const [sidebarHydrated, setSidebarHydrated] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  // Load persisted sidebar expansion after hydration.
+  useEffect(() => {
+    const saved = localStorage.getItem('stella-sidebar-expanded');
+    setIsSidebarExpanded(saved !== null ? saved === 'true' : true);
+    setSidebarHydrated(true);
+  }, []);
 
   // Load auth state on client and listen for changes
   useEffect(() => {
@@ -45,8 +50,9 @@ export function StellaLayoutShell({ children }: { children: React.ReactNode }) {
   // Persist sidebar state changes
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (!sidebarHydrated) return;
     localStorage.setItem('stella-sidebar-expanded', String(isSidebarExpanded));
-  }, [isSidebarExpanded]);
+  }, [isSidebarExpanded, sidebarHydrated]);
 
   // While auth is loading, render a sidebar skeleton so the content area doesn't shift on resolve.
   if (authLoading) {
@@ -66,7 +72,7 @@ export function StellaLayoutShell({ children }: { children: React.ReactNode }) {
                 <h3 className="text-2xl font-light text-muted-foreground py-2 opacity-0">​ </h3>
               )}
             </div>
-            <div className={`flex justify-end ${isSidebarExpanded ? 'pr-2 py-3' : 'pr-3 py-3 pb-3'}`}>
+            <div className={`flex justify-end py-3 ${isSidebarExpanded ? 'pr-2' : 'pr-3'}`}>
               <div className="w-10 h-10 flex items-center justify-center text-muted-foreground">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
               </div>
@@ -110,7 +116,7 @@ export function StellaLayoutShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           {/* User row */}
-          <div className={`${isSidebarExpanded ? 'border-t border-border' : 'pt-3'}`}>
+          <div className="border-t border-border">
             <div className={`w-full ${isSidebarExpanded ? 'h-16' : 'h-16'} flex items-center px-1`}>
               <div className={`flex items-center w-full ${isSidebarExpanded ? 'pl-3' : ''}`}>
                 <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
@@ -145,6 +151,7 @@ export function StellaLayoutShell({ children }: { children: React.ReactNode }) {
       <StellaSidebar
         isExpanded={isSidebarExpanded}
         onExpandedChange={setIsSidebarExpanded}
+        user={user}
       />
       <div
         className={`min-h-screen transition-[margin-left] duration-200 ${
