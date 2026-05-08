@@ -4,64 +4,40 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/supabase/auth';
 import { generateImagesForDraft } from '@/lib/services/generate-service';
 import { GenerateForChatBodySchema, MessageMetaSchema } from '@/lib/schemas/chat';
-import { createRequestLogger } from '@/lib/observability/logger';
-import { checkRateLimit } from '@/lib/security/rate-limit';
 import { serverEnv } from '@/lib/env/server';
 import { fetchLatestAssistantMessageForChat } from '@/lib/supabase/message-queries';
+import {
+  buildRouteContext,
+  enforceRateLimit,
+  parseJsonBody,
+  unauthorizedResponse,
+} from '@/lib/api/route-helpers';
 
 export async function POST(request: NextRequest) {
-  const requestId = request.headers.get('x-request-id') ?? crypto.randomUUID();
-  const forwardedFor = request.headers.get('x-forwarded-for') ?? '';
-  const clientIp = forwardedFor.split(',')[0]?.trim() || 'unknown';
-  const logger = createRequestLogger({ requestId, route: '/api/stella/generate/images', clientIp });
+  const { logger, clientIp } = buildRouteContext(request, '/api/stella/generate/images');
 
   try {
-    let jsonBody: unknown;
-    try {
-      jsonBody = await request.json();
-    } catch {
-      return NextResponse.json({ ok: false, error: 'Invalid or empty JSON body' }, { status: 400 });
-    }
+    const body = await parseJsonBody(request, GenerateForChatBodySchema);
+    if (body.error) return body.error;
 
-    const parsedBody = GenerateForChatBodySchema.safeParse(jsonBody);
-    if (!parsedBody.success) {
-      return NextResponse.json({ ok: false, error: 'Invalid request payload' }, { status: 400 });
-    }
-
-    const { chatId, draft, showImages = false, messageId } = parsedBody.data;
+    const { chatId, draft, showImages = false, messageId } = body.data;
 
     if (!chatId) {
       return NextResponse.json({ ok: false, error: 'Missing chatId' }, { status: 400 });
     }
 
     const { supabase, user } = await getAuthenticatedUser();
-    if (!user) {
-      return NextResponse.json({ ok: false, error: 'User not authenticated' }, { status: 401 });
-    }
+    if (!user) return unauthorizedResponse();
 
     const limit = Number(serverEnv.RATE_LIMIT_GENERATE_IMAGES_PER_MINUTE) || 10;
-    const rateLimit = await checkRateLimit({
+    const rateLimited = await enforceRateLimit({
       scope: 'generate:images',
       identifier: user.id || clientIp,
       limit,
-      windowSeconds: 60,
+      logger,
+      logEvent: 'generate.images.rate_limited',
     });
-
-    if (!rateLimit.allowed) {
-      logger.warn('generate.images.rate_limited', { userId: user.id, limit, retryAfterSeconds: rateLimit.retryAfterSeconds });
-      return NextResponse.json(
-        { ok: false, error: 'Rate limit exceeded. Please try again shortly.', retryAfterSeconds: rateLimit.retryAfterSeconds },
-        {
-          status: 429,
-          headers: {
-            'Retry-After': String(rateLimit.retryAfterSeconds),
-            'X-RateLimit-Limit': String(limit),
-            'X-RateLimit-Remaining': String(rateLimit.remaining),
-            'X-RateLimit-Reset': String(rateLimit.resetAtUnix),
-          },
-        }
-      );
-    }
+    if (rateLimited) return rateLimited;
 
     if (!showImages) {
       return NextResponse.json({ ok: true, groupCount: 0, latencyMs: 0 });
@@ -83,16 +59,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: false, error: 'Missing draft for image generation' }, { status: 400 });
       }
 
-      effectiveDraft = userMessages[0]?.content ?? '';
+      effectiveDraft = (userMessages[0]?.content ?? '').trim();
     }
 
-    const trimmedDraft = effectiveDraft.trim();
-    if (!trimmedDraft) {
+    if (!effectiveDraft) {
       return NextResponse.json({ ok: false, error: 'Missing draft for image generation' }, { status: 400 });
     }
 
     const imageStart = Date.now();
-    const { groups } = await generateImagesForDraft(trimmedDraft);
+    const { groups } = await generateImagesForDraft(effectiveDraft);
     const imageLatency = Date.now() - imageStart;
 
     const { data: messages, error: fetchError } = await fetchLatestAssistantMessageForChat(
@@ -110,16 +85,16 @@ export async function POST(request: NextRequest) {
     const previousMeta = parsedMeta.success ? parsedMeta.data : {};
     const previousLatency = typeof previousMeta.latencyMs === 'number' ? previousMeta.latencyMs : 0;
 
-    const newMeta = {
-      ...previousMeta,
-      images: groups,
-      latencyMs: previousLatency + imageLatency,
-      showImages: true,
-    };
-
     const { error: updateError } = await supabase
       .from('messages')
-      .update({ meta: newMeta })
+      .update({
+        meta: {
+          ...previousMeta,
+          images: groups,
+          latencyMs: previousLatency + imageLatency,
+          showImages: true,
+        },
+      })
       .eq('message_id', target.message_id)
       .eq('user_id', user.id);
 

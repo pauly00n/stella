@@ -3,6 +3,7 @@ import type {
   MessageMeta,
   TaskType,
 } from '@/lib/schemas/chat';
+import { readSseEvents } from '@/lib/streaming/sse';
 
 export type { DefaultTask, TaskType };
 
@@ -25,6 +26,18 @@ export interface Message {
   created_at: string;
 }
 
+function extractErrorMessage(payload: unknown, fallback: string): string {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'error' in payload &&
+    typeof (payload as { error?: unknown }).error === 'string'
+  ) {
+    return (payload as { error: string }).error;
+  }
+  return fallback;
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -34,22 +47,10 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
 
-  let payload: unknown = null;
-  try {
-    payload = await response.json();
-  } catch {
-    // no-op
-  }
+  const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const message =
-      typeof payload === 'object' &&
-      payload !== null &&
-      'error' in payload &&
-      typeof (payload as { error?: unknown }).error === 'string'
-        ? (payload as { error: string }).error
-        : 'Request failed';
-    throw new Error(message);
+    throw new Error(extractErrorMessage(payload, 'Request failed'));
   }
 
   return payload as T;
@@ -166,40 +167,11 @@ export async function* streamGenerate(params: {
   });
 
   if (!response.ok) {
-    let errMsg = 'Generation request failed';
-    try {
-      const payload = await response.json();
-      if (typeof payload?.error === 'string') errMsg = payload.error;
-    } catch { /* no-op */ }
-    throw new Error(errMsg);
+    const payload = await response.json().catch(() => null);
+    throw new Error(extractErrorMessage(payload, 'Generation request failed'));
   }
 
   if (!response.body) throw new Error('No response body from generate endpoint');
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const jsonStr = trimmed.slice(5).trim();
-        if (!jsonStr || jsonStr === '[DONE]') continue;
-        try {
-          yield JSON.parse(jsonStr) as StreamGenerateEvent;
-        } catch { /* malformed line — skip */ }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
+  yield* readSseEvents<StreamGenerateEvent>(response.body);
 }

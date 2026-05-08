@@ -1,24 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/auth";
 import { UpdateChatTitleBodySchema } from "@/lib/schemas/chat";
-import { createRequestLogger } from "@/lib/observability/logger";
+import {
+  buildRouteContext,
+  parseJsonBody,
+  unauthorizedResponse,
+} from "@/lib/api/route-helpers";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ chatID: string }> },
-) {
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const logger = createRequestLogger({
-    requestId,
-    route: "/api/stella/chats/[chatID]",
-    method: "GET",
-  });
+type Params = { params: Promise<{ chatID: string }> };
+
+export async function GET(request: NextRequest, { params }: Params) {
+  const { logger } = buildRouteContext(request, "/api/stella/chats/[chatID]", "GET");
 
   const { chatID } = await params;
   const { supabase, user } = await getAuthenticatedUser();
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
-  }
+  if (!user) return unauthorizedResponse();
 
   const { data, error } = await supabase
     .from("chats")
@@ -35,39 +31,19 @@ export async function GET(
   return NextResponse.json({ ok: true, chat: data });
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ chatID: string }> },
-) {
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const logger = createRequestLogger({
-    requestId,
-    route: "/api/stella/chats/[chatID]",
-    method: "PATCH",
-  });
+export async function PATCH(request: NextRequest, { params }: Params) {
+  const { logger } = buildRouteContext(request, "/api/stella/chats/[chatID]", "PATCH");
 
   const { chatID } = await params;
   const { supabase, user } = await getAuthenticatedUser();
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
-  }
+  if (!user) return unauthorizedResponse();
 
-  let jsonBody: unknown;
-  try {
-    jsonBody = await request.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const parsed = UpdateChatTitleBodySchema.safeParse(jsonBody);
-  if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: "Missing title" }, { status: 400 });
-  }
-  const { title } = parsed.data;
+  const body = await parseJsonBody(request, UpdateChatTitleBodySchema);
+  if (body.error) return body.error;
 
   const { data, error } = await supabase
     .from("chats")
-    .update({ title, updated_at: new Date().toISOString() })
+    .update({ title: body.data.title, updated_at: new Date().toISOString() })
     .eq("chat_id", chatID)
     .eq("user_id", user.id)
     .select("*")
@@ -81,22 +57,12 @@ export async function PATCH(
   return NextResponse.json({ ok: true, chat: data });
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ chatID: string }> },
-) {
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const logger = createRequestLogger({
-    requestId,
-    route: "/api/stella/chats/[chatID]",
-    method: "DELETE",
-  });
+export async function DELETE(request: NextRequest, { params }: Params) {
+  const { logger } = buildRouteContext(request, "/api/stella/chats/[chatID]", "DELETE");
 
   const { chatID } = await params;
   const { supabase, user } = await getAuthenticatedUser();
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
-  }
+  if (!user) return unauthorizedResponse();
 
   // Relies on ON DELETE CASCADE on the messages.chat_id FK
   const { error } = await supabase

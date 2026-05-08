@@ -12,6 +12,8 @@ function getMessageMeta(meta: unknown): MessageMeta {
 // Module-level store so streaming content survives client-side navigations.
 const streamingStore: Map<string, string> = new Map();
 const streamingListeners: Map<string, Set<(text: string) => void>> = new Map();
+const STREAM_DONE = '__done__';
+const STREAM_ERROR = '__error__';
 
 function notifyListeners(chatId: string, text: string) {
   streamingListeners.get(chatId)?.forEach((fn) => fn(text));
@@ -35,21 +37,20 @@ export function startStreamForChat(params: {
     try {
       for await (const event of streamGenerate(params)) {
         if ('chunk' in event) {
-          const prev = streamingStore.get(params.chatId) ?? '';
-          const next = prev + event.chunk;
+          const next = (streamingStore.get(params.chatId) ?? '') + event.chunk;
           streamingStore.set(params.chatId, next);
           notifyListeners(params.chatId, next);
         } else if ('done' in event) {
-          notifyListeners(params.chatId, '__done__');
+          notifyListeners(params.chatId, STREAM_DONE);
         } else if ('error' in event) {
           streamingStore.delete(params.chatId);
-          notifyListeners(params.chatId, '__error__');
+          notifyListeners(params.chatId, STREAM_ERROR);
         }
       }
     } catch (e) {
       console.error('[orchestration] stream error:', e);
       streamingStore.delete(params.chatId);
-      notifyListeners(params.chatId, '__error__');
+      notifyListeners(params.chatId, STREAM_ERROR);
     }
   })();
 }
@@ -84,9 +85,9 @@ export function useChatOrchestration({
   // Subscribe to module-level stream updates
   useEffect(() => {
     const listener = (text: string) => {
-      if (text === '__done__') {
+      if (text === STREAM_DONE) {
         refetch({ silent: true }).catch(() => {});
-      } else if (text === '__error__') {
+      } else if (text === STREAM_ERROR) {
         setStreamingContent('');
         refetch({ silent: true }).catch(() => {});
       } else {
@@ -124,17 +125,30 @@ export function useChatOrchestration({
       });
   }, [chatID]);
 
+  // Partition messages once per render. The `meta` field is parsed lazily where used.
+  const { userMessages, assistantMessages, latestAssistantMessage, latestAssistantMeta } = useMemo(() => {
+    const users: Message[] = [];
+    const assistants: Message[] = [];
+    for (const m of messages) {
+      if (m.role === 'user') users.push(m);
+      else assistants.push(m);
+    }
+    const latest = assistants.length > 0 ? assistants[assistants.length - 1] : null;
+    return {
+      userMessages: users,
+      assistantMessages: assistants,
+      latestAssistantMessage: latest,
+      latestAssistantMeta: latest ? getMessageMeta(latest.meta) : null,
+    };
+  }, [messages]);
+
   // Returns grouped image results from the latest assistant message.
-  // Normalizes both old flat ImageResult[] and new DifferentialGroup[] formats.
+  // Normalizes both legacy flat ImageResult[] and new DifferentialGroup[] formats.
   const assistantImages = useMemo((): DifferentialGroup[] => {
-    const assistants = messages.filter((m) => m.role !== "user");
-    if (assistants.length === 0) return [];
-    const last = assistants[assistants.length - 1];
-    const meta = getMessageMeta(last.meta);
-    const images = meta.images ?? [];
+    const images = latestAssistantMeta?.images ?? [];
     if (images.length === 0) return [];
 
-    // New format: first item has a 'differentialName' key
+    // New format: first item carries a 'differentialName' key
     const first = images[0] as Record<string, unknown>;
     if (first && typeof first === "object" && "differentialName" in first) {
       return images as DifferentialGroup[];
@@ -142,70 +156,52 @@ export function useChatOrchestration({
 
     // Legacy flat format: wrap in a single unlabeled group
     return [{ differentialName: "Images", searchQuery: "", images: images as ImageMeta[] }];
-  }, [messages]);
-
-  const latestAssistantMessage = useMemo(() => {
-    const assistants = messages.filter((m) => m.role !== "user");
-    if (assistants.length === 0) return null;
-    return assistants[assistants.length - 1];
-  }, [messages]);
+  }, [latestAssistantMeta]);
 
   const assistantMessageKey = useMemo(() => {
-    if (!latestAssistantMessage) return null;
-    const meta = getMessageMeta(latestAssistantMessage.meta);
-    return `${latestAssistantMessage.message_id}-${meta.status}-${latestAssistantMessage.content?.length || 0}`;
-  }, [latestAssistantMessage]);
+    if (!latestAssistantMessage || !latestAssistantMeta) return null;
+    return `${latestAssistantMessage.message_id}-${latestAssistantMeta.status}-${latestAssistantMessage.content?.length || 0}`;
+  }, [latestAssistantMessage, latestAssistantMeta]);
 
   const shouldShowPendingAssistant = useMemo(() => {
     // Always show the pending area while we have live streaming content,
     // regardless of DB state or whether chat metadata has loaded yet.
     if (streamingContent) return true;
 
-    const userMessages = messages.filter((m) => m.role === "user");
-    const assistantMessages = messages.filter((m) => m.role !== "user");
+    const hasIncompleteAssistant = assistantMessages.some((m) => {
+      const status = getMessageMeta(m.meta).status;
+      return status && status !== "complete";
+    });
 
+    // Auto-mode opener: show pending until assistant responds, even before any assistant row exists.
     if (userMessages.length === 1 && chat?.default_task === "auto") {
-      if (assistantMessages.length > 0) {
-        return assistantMessages.some((m) => {
-          const meta = getMessageMeta(m.meta);
-          return meta.status && meta.status !== "complete";
-        });
-      }
-      return true;
+      return assistantMessages.length === 0 || hasIncompleteAssistant;
     }
 
     if (userMessages.length !== 1 && assistantMessages.length === 0) {
       return false;
     }
 
-    return assistantMessages.some((m) => {
-      const meta = getMessageMeta(m.meta);
-      return meta.status && meta.status !== "complete";
-    });
-  }, [messages, chat, streamingContent]);
+    return hasIncompleteAssistant;
+  }, [userMessages, assistantMessages, chat, streamingContent]);
 
   const shouldShowSearchingImages = useMemo(() => {
-    if (!latestAssistantMessage) return false;
-    const meta = getMessageMeta(latestAssistantMessage.meta);
-    const wantImages = !!meta.showImages;
-    const task = meta.task;
-    const hasImages = Array.isArray(meta.images) && meta.images.length > 0;
-    return wantImages && task !== "none" && !hasImages && !shouldShowPendingAssistant;
-  }, [latestAssistantMessage, shouldShowPendingAssistant]);
+    if (!latestAssistantMeta) return false;
+    const wantImages = !!latestAssistantMeta.showImages;
+    const hasImages = Array.isArray(latestAssistantMeta.images) && latestAssistantMeta.images.length > 0;
+    return wantImages && latestAssistantMeta.task !== "none" && !hasImages && !shouldShowPendingAssistant;
+  }, [latestAssistantMeta, shouldShowPendingAssistant]);
 
   // Once the DB message is complete, clear any streaming content so the
   // DB-backed render takes over without duplication.
   useEffect(() => {
-    if (!latestAssistantMessage) return;
-    const meta = getMessageMeta(latestAssistantMessage.meta);
-    if (meta.status === 'complete' && streamingContent) {
+    if (latestAssistantMeta?.status === 'complete' && streamingContent) {
       clearStreamingContent();
     }
-  }, [latestAssistantMessage, streamingContent, clearStreamingContent]);
+  }, [latestAssistantMeta, streamingContent, clearStreamingContent]);
 
   useEffect(() => {
-    // Once streaming content is arriving, clear any thinking phase label —
-    // the live text is the visual indicator of progress.
+    // Once streaming content is arriving, the live text is the visual progress indicator.
     if (streamingContent) {
       setThinkingPhase(null);
       return;
@@ -216,52 +212,37 @@ export function useChatOrchestration({
       return;
     }
 
-    if (latestAssistantMessage) {
-      const meta = getMessageMeta(latestAssistantMessage.meta);
-      const status = meta.status;
-
-      if (status === "analyzing_task") {
-        setThinkingPhase("analyzing");
-      } else if (status === "generating") {
-        setThinkingPhase("generating");
-      } else if (status === "complete") {
-        setThinkingPhase(null);
-      } else {
-        setThinkingPhase(null);
-      }
+    if (latestAssistantMeta) {
+      const status = latestAssistantMeta.status;
+      setThinkingPhase(
+        status === "analyzing_task" ? "analyzing" :
+        status === "generating" ? "generating" :
+        null
+      );
       return;
     }
 
-    if (!shouldShowPendingAssistant) {
+    if (!shouldShowPendingAssistant || !chat) {
       setThinkingPhase(null);
       return;
     }
 
-    if (!chat) return;
-    if (chat.default_task === "auto") {
-      setThinkingPhase("analyzing");
-    } else {
-      setThinkingPhase("generating");
-    }
-  }, [shouldShowPendingAssistant, chat, latestAssistantMessage, shouldShowSearchingImages, streamingContent]);
+    setThinkingPhase(chat.default_task === "auto" ? "analyzing" : "generating");
+  }, [shouldShowPendingAssistant, chat, latestAssistantMeta, shouldShowSearchingImages, streamingContent]);
 
   useEffect(() => {
-    if (!latestAssistantMessage) return;
-    const meta = getMessageMeta(latestAssistantMessage.meta);
-    const wantImages = !!meta.showImages;
-    const hasImagesArray = Array.isArray(meta.images) && meta.images.length > 0;
-    const status = meta.status;
-    const task = meta.task;
-    const hasContent =
-      latestAssistantMessage.content && latestAssistantMessage.content.trim().length > 0;
+    if (!latestAssistantMessage || !latestAssistantMeta) return;
+    const wantImages = !!latestAssistantMeta.showImages;
+    const hasImagesArray = Array.isArray(latestAssistantMeta.images) && latestAssistantMeta.images.length > 0;
+    const hasContent = !!latestAssistantMessage.content?.trim();
 
     if (
       !wantImages ||
       hasImagesArray ||
       imagesRequestStarted ||
       !hasContent ||
-      status !== "complete" ||
-      task === "none"
+      latestAssistantMeta.status !== "complete" ||
+      latestAssistantMeta.task === "none"
     ) {
       return;
     }
@@ -287,18 +268,19 @@ export function useChatOrchestration({
         );
         setImagesRequestStarted(false);
       });
-  }, [latestAssistantMessage, assistantMessageKey, chatID, imagesRequestStarted, refetch]);
+  }, [latestAssistantMessage, latestAssistantMeta, assistantMessageKey, chatID, imagesRequestStarted, refetch]);
 
   // Trigger paper search once text is complete — fires for all diagnostic results regardless of showImages
   useEffect(() => {
-    if (!latestAssistantMessage) return;
-    const meta = getMessageMeta(latestAssistantMessage.meta);
+    if (!latestAssistantMessage || !latestAssistantMeta) return;
+    const hasPapers = Array.isArray(latestAssistantMeta.papers) && latestAssistantMeta.papers.length > 0;
+
     if (
-      (Array.isArray(meta.papers) && meta.papers.length > 0) ||
+      hasPapers ||
       papersRequestStarted ||
       !latestAssistantMessage.content?.trim() ||
-      meta.status !== "complete" ||
-      meta.task === "none"
+      latestAssistantMeta.status !== "complete" ||
+      latestAssistantMeta.task === "none"
     ) return;
 
     setPapersRequestStarted(true);
@@ -316,7 +298,7 @@ export function useChatOrchestration({
       .catch(() => {
         setPapersRequestStarted(false);
       });
-  }, [latestAssistantMessage, assistantMessageKey, chatID, papersRequestStarted, refetch]);
+  }, [latestAssistantMessage, latestAssistantMeta, assistantMessageKey, chatID, papersRequestStarted, refetch]);
 
   useEffect(() => {
     if (!shouldShowPendingAssistant && !shouldShowSearchingImages) return;
@@ -329,15 +311,15 @@ export function useChatOrchestration({
   }, [shouldShowPendingAssistant, shouldShowSearchingImages, realtimeConnected, refetch]);
 
   const shouldShowPendingPapers = useMemo(() => {
-    if (!latestAssistantMessage) return false;
-    const meta = getMessageMeta(latestAssistantMessage.meta);
+    if (!latestAssistantMeta) return false;
+    const hasPapers = Array.isArray(latestAssistantMeta.papers) && latestAssistantMeta.papers.length > 0;
     return (
-      meta.status === "complete" &&
-      meta.task !== "none" &&
-      !(Array.isArray(meta.papers) && meta.papers.length > 0) &&
+      latestAssistantMeta.status === "complete" &&
+      latestAssistantMeta.task !== "none" &&
+      !hasPapers &&
       papersRequestStarted
     );
-  }, [latestAssistantMessage, papersRequestStarted]);
+  }, [latestAssistantMeta, papersRequestStarted]);
 
   return {
     chat,

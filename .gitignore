@@ -38,3 +38,4 @@ next-env.d.ts
 
 /.claude
 .blackboxcli/
+.claude/settings.local.json

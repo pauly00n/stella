@@ -5,35 +5,29 @@ import {
   type TaskType,
   type DefaultTask,
 } from "@/lib/schemas/chat";
-import { createRequestLogger } from "@/lib/observability/logger";
+import {
+  buildRouteContext,
+  parseJsonBody,
+  unauthorizedResponse,
+} from "@/lib/api/route-helpers";
 
-function mapTaskToDefaultTask(task: TaskType): DefaultTask {
-  const taskMap: Record<TaskType, DefaultTask> = {
-    Auto: "auto",
-    Tumor: "tumor",
-    Arthritis: "arthritis",
-    Trauma: "trauma",
-    Infection: "infection",
-    AVN: "avn",
-    Inflammatory: "inflammatory",
-    Developmental: "developmental",
-    Vascular: "vascular",
-  };
-  return taskMap[task];
-}
+const TASK_TO_DEFAULT: Record<TaskType, DefaultTask> = {
+  Auto: "auto",
+  Tumor: "tumor",
+  Arthritis: "arthritis",
+  Trauma: "trauma",
+  Infection: "infection",
+  AVN: "avn",
+  Inflammatory: "inflammatory",
+  Developmental: "developmental",
+  Vascular: "vascular",
+};
 
 export async function GET(request: NextRequest) {
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const logger = createRequestLogger({
-    requestId,
-    route: "/api/stella/chats",
-    method: "GET",
-  });
+  const { logger } = buildRouteContext(request, "/api/stella/chats", "GET");
 
   const { supabase, user } = await getAuthenticatedUser();
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
-  }
+  if (!user) return unauthorizedResponse();
 
   const { data, error } = await supabase
     .from("chats")
@@ -50,41 +44,21 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const logger = createRequestLogger({
-    requestId,
-    route: "/api/stella/chats",
-    method: "POST",
-  });
+  const { logger } = buildRouteContext(request, "/api/stella/chats", "POST");
 
   const { supabase, user } = await getAuthenticatedUser();
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
-  }
+  if (!user) return unauthorizedResponse();
 
-  let jsonBody: unknown;
-  try {
-    jsonBody = await request.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
-  }
+  const body = await parseJsonBody(request, CreateChatBodySchema);
+  if (body.error) return body.error;
 
-  const parsed = CreateChatBodySchema.safeParse(jsonBody);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { ok: false, error: "Invalid messageContent or task" },
-      { status: 400 },
-    );
-  }
-
-  const { messageContent, task } = parsed.data;
-  const defaultTask = mapTaskToDefaultTask(task);
+  const { messageContent, task } = body.data;
 
   const { data: chatData, error: chatError } = await supabase
     .from("chats")
     .insert({
       user_id: user.id,
-      default_task: defaultTask,
+      default_task: TASK_TO_DEFAULT[task],
     })
     .select("*")
     .single();

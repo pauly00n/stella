@@ -4,6 +4,7 @@
  */
 import { serverEnv } from '@/lib/env/server';
 import { createRequestLogger } from '@/lib/observability/logger';
+import { readSseEvents } from '@/lib/streaming/sse';
 import type { Json } from '@/lib/supabase/database.types';
 
 const GEMINI_API_KEY = serverEnv.GEMINI_API_KEY;
@@ -159,6 +160,18 @@ function shouldRetryStatus(status: number): boolean {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
+/**
+ * Strips markdown ```json fences and surrounding whitespace from a Gemini response.
+ * Gemini sometimes wraps JSON output in code fences despite explicit instructions.
+ */
+function stripJsonCodeFences(raw: string): string {
+  let s = raw.trim();
+  if (s.startsWith('```json')) s = s.slice(7);
+  else if (s.startsWith('```')) s = s.slice(3);
+  if (s.endsWith('```')) s = s.slice(0, -3);
+  return s.trim();
+}
+
 async function fetchWithRetry(
   input: string | URL,
   init: RequestInit,
@@ -203,13 +216,7 @@ export async function selectTaskForAutoMode(
   draft: string
 ): Promise<'diagnostic' | 'none'> {
   const prompt = `${TASK_SELECTION_PROMPT}\n\n<< TEXT >>\n${draft.trim()}`;
-  const raw = await callGemini(prompt);
-
-  let cleaned = raw.trim();
-  if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
-  if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
-  if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
-  cleaned = cleaned.trim();
+  const cleaned = stripJsonCodeFences(await callGemini(prompt));
 
   try {
     const parsed = JSON.parse(cleaned);
@@ -316,18 +323,24 @@ async function searchImages(query: string, num: number = 5): Promise<ImageResult
     }
 
     const data = await response.json();
-    if (!data.items) return [];
+    const items = (data.items ?? []) as Array<{
+      title?: string;
+      link?: string;
+      displayLink?: string;
+      snippet?: string;
+      image?: { contextLink?: string; thumbnailLink?: string; width?: number; height?: number };
+    }>;
 
-    return data.items.map((item: Record<string, unknown>) => ({
-      title: item.title || '',
-      link: item.link || '',
-      displayLink: item.displayLink || '',
-      snippet: item.snippet || '',
+    return items.map((item) => ({
+      title: item.title ?? '',
+      link: item.link ?? '',
+      displayLink: item.displayLink ?? '',
+      snippet: item.snippet ?? '',
       image: {
-        contextLink: (item.image as Record<string, unknown>)?.contextLink || '',
-        thumbnailLink: (item.image as Record<string, unknown>)?.thumbnailLink || '',
-        width: (item.image as Record<string, unknown>)?.width || 0,
-        height: (item.image as Record<string, unknown>)?.height || 0,
+        contextLink: item.image?.contextLink ?? '',
+        thumbnailLink: item.image?.thumbnailLink ?? '',
+        width: item.image?.width ?? 0,
+        height: item.image?.height ?? 0,
       },
     }));
   } catch (error) {
@@ -343,20 +356,11 @@ async function searchImages(query: string, num: number = 5): Promise<ImageResult
  */
 export async function generateImagesForDraft(draft: string): Promise<ImageGenerationResult> {
   try {
-    if (!draft || !draft.trim()) return { groups: [] };
+    if (!draft.trim()) return { groups: [] };
 
-    const keywordPrompt = KEYWORD_EXTRACTION_FOR_SEARCH_API + draft;
-    const keywordResponse = await callGemini(keywordPrompt);
+    const cleaned = stripJsonCodeFences(await callGemini(KEYWORD_EXTRACTION_FOR_SEARCH_API + draft));
+    const extracted = JSON.parse(cleaned) as Array<{ differentialName: string; searchQuery: string }>;
 
-    let cleaned = keywordResponse.trim();
-    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
-    if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
-    cleaned = cleaned.trim();
-
-    const extracted: Array<{ differentialName: string; searchQuery: string }> = JSON.parse(cleaned);
-
-    // Run all 3 searches in parallel
     const groups = await Promise.all(
       extracted.map(async (g) => ({
         differentialName: g.differentialName,
@@ -576,38 +580,10 @@ export async function* streamGeminiReport(
     throw new Error('Gemini streaming API returned no body');
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      // Keep the last (potentially incomplete) line in the buffer
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const jsonStr = trimmed.slice(5).trim();
-        if (!jsonStr || jsonStr === '[DONE]') continue;
-
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const chunk: string =
-            parsed?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-          if (chunk) yield chunk;
-        } catch {
-          // Malformed SSE line — skip
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
+  type GeminiSseEvent = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  for await (const event of readSseEvents<GeminiSseEvent>(response.body)) {
+    const chunk = event?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    if (chunk) yield chunk;
   }
 }
 
