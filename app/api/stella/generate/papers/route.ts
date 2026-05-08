@@ -4,31 +4,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/supabase/auth';
 import { searchPapersForContent } from '@/lib/services/generate-service';
 import { GenerateForChatBodySchema, MessageMetaSchema } from '@/lib/schemas/chat';
-import { createRequestLogger } from '@/lib/observability/logger';
-import { checkRateLimit } from '@/lib/security/rate-limit';
 import { serverEnv } from '@/lib/env/server';
 import { fetchLatestAssistantMessageForChat } from '@/lib/supabase/message-queries';
+import {
+  buildRouteContext,
+  enforceRateLimit,
+  parseJsonBody,
+  unauthorizedResponse,
+} from '@/lib/api/route-helpers';
 
 export async function POST(request: NextRequest) {
-  const requestId = request.headers.get('x-request-id') ?? crypto.randomUUID();
-  const forwardedFor = request.headers.get('x-forwarded-for') ?? '';
-  const clientIp = forwardedFor.split(',')[0]?.trim() || 'unknown';
-  const logger = createRequestLogger({ requestId, route: '/api/stella/generate/papers', clientIp });
+  const { logger, clientIp } = buildRouteContext(request, '/api/stella/generate/papers');
 
   try {
-    let jsonBody: unknown;
-    try {
-      jsonBody = await request.json();
-    } catch {
-      return NextResponse.json({ ok: false, error: 'Invalid or empty JSON body' }, { status: 400 });
-    }
+    const body = await parseJsonBody(request, GenerateForChatBodySchema);
+    if (body.error) return body.error;
 
-    const parsedBody = GenerateForChatBodySchema.safeParse(jsonBody);
-    if (!parsedBody.success) {
-      return NextResponse.json({ ok: false, error: 'Invalid request payload' }, { status: 400 });
-    }
-
-    const { chatId, draft, messageId } = parsedBody.data;
+    const { chatId, draft, messageId } = body.data;
 
     if (!chatId) {
       return NextResponse.json({ ok: false, error: 'Missing chatId' }, { status: 400 });
@@ -40,33 +32,17 @@ export async function POST(request: NextRequest) {
     }
 
     const { supabase, user } = await getAuthenticatedUser();
-    if (!user) {
-      return NextResponse.json({ ok: false, error: 'User not authenticated' }, { status: 401 });
-    }
+    if (!user) return unauthorizedResponse();
 
     const limit = Number(serverEnv.RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE) || 20;
-    const rateLimit = await checkRateLimit({
+    const rateLimited = await enforceRateLimit({
       scope: 'generate:papers',
       identifier: user.id || clientIp,
       limit,
-      windowSeconds: 60,
+      logger,
+      logEvent: 'generate.papers.rate_limited',
     });
-
-    if (!rateLimit.allowed) {
-      logger.warn('generate.papers.rate_limited', { userId: user.id, limit, retryAfterSeconds: rateLimit.retryAfterSeconds });
-      return NextResponse.json(
-        { ok: false, error: 'Rate limit exceeded. Please try again shortly.', retryAfterSeconds: rateLimit.retryAfterSeconds },
-        {
-          status: 429,
-          headers: {
-            'Retry-After': String(rateLimit.retryAfterSeconds),
-            'X-RateLimit-Limit': String(limit),
-            'X-RateLimit-Remaining': String(rateLimit.remaining),
-            'X-RateLimit-Reset': String(rateLimit.resetAtUnix),
-          },
-        }
-      );
-    }
+    if (rateLimited) return rateLimited;
 
     const { groups } = await searchPapersForContent(content);
 

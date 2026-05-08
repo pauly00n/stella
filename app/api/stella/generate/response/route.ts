@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAuthenticatedUser } from '@/lib/supabase/auth';
 import {
   streamGeminiReport,
@@ -10,75 +11,91 @@ import {
   GenerateForChatBodySchema,
   MessageMetaSchema,
   type InternalTask,
-  type TaskType,
 } from '@/lib/schemas/chat';
-import { createRequestLogger } from '@/lib/observability/logger';
-import { checkRateLimit } from '@/lib/security/rate-limit';
 import { serverEnv } from '@/lib/env/server';
+import {
+  buildRouteContext,
+  enforceRateLimit,
+  parseJsonBody,
+  unauthorizedResponse,
+} from '@/lib/api/route-helpers';
 
-function mapUiModeToInternalTask(
-  mode: TaskType,
-  autoTask: InternalTask | null
-): InternalTask {
-  if (mode === 'Auto') return autoTask ?? 'none';
-  return 'diagnostic';
+interface AssistantMessageMeta {
+  status: 'analyzing_task' | 'generating' | 'complete';
+  images: never[];
+  task: InternalTask | null;
+  latencyMs: number;
+  showImages: boolean;
+  idempotencyKey?: string;
+}
+
+/**
+ * Writes an assistant message — either by updating a pre-inserted placeholder
+ * or by inserting a fresh row when the placeholder was never created.
+ * Returns the resulting message_id, or null on failure.
+ */
+async function writeAssistantMessage(
+  supabase: SupabaseClient,
+  args: {
+    chatId: string;
+    userId: string;
+    placeholderMessageId: string | null;
+    content: string;
+    meta: AssistantMessageMeta;
+  },
+): Promise<{ messageId: string | null; error: unknown }> {
+  if (args.placeholderMessageId) {
+    const { data, error } = await supabase
+      .from('messages')
+      .update({ content: args.content, meta: args.meta })
+      .eq('message_id', args.placeholderMessageId)
+      .eq('user_id', args.userId)
+      .select('message_id')
+      .single();
+    return { messageId: data?.message_id ?? null, error };
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .insert({
+      chat_id: args.chatId,
+      user_id: args.userId,
+      role: 'assistant',
+      content: args.content,
+      meta: args.meta,
+    })
+    .select('message_id')
+    .single();
+  return { messageId: data?.message_id ?? null, error };
 }
 
 export async function POST(request: NextRequest) {
-  const requestId = request.headers.get('x-request-id') ?? crypto.randomUUID();
-  const forwardedFor = request.headers.get('x-forwarded-for') ?? '';
-  const clientIp = forwardedFor.split(',')[0]?.trim() || 'unknown';
-  const logger = createRequestLogger({ requestId, route: '/api/stella/generate/response', clientIp });
+  const { logger, clientIp } = buildRouteContext(request, '/api/stella/generate/response');
 
   try {
-    let jsonBody: unknown;
-    try {
-      jsonBody = await request.json();
-    } catch {
-      return NextResponse.json({ ok: false, error: 'Invalid or empty JSON body' }, { status: 400 });
-    }
+    const body = await parseJsonBody(request, GenerateForChatBodySchema);
+    if (body.error) return body.error;
 
-    const parsedBody = GenerateForChatBodySchema.safeParse(jsonBody);
-    if (!parsedBody.success) {
-      return NextResponse.json({ ok: false, error: 'Invalid request payload' }, { status: 400 });
-    }
-
-    const { chatId, draft, mode, showImages = false, idempotencyKey } = parsedBody.data;
+    const { chatId, draft, mode, showImages = false, idempotencyKey } = body.data;
 
     if (!chatId || !draft?.trim() || !mode) {
       return NextResponse.json({ ok: false, error: 'Missing chatId, draft, or mode' }, { status: 400 });
     }
 
     const { supabase, user } = await getAuthenticatedUser();
-    if (!user) {
-      return NextResponse.json({ ok: false, error: 'User not authenticated' }, { status: 401 });
-    }
+    if (!user) return unauthorizedResponse();
 
     const limit = Number(serverEnv.RATE_LIMIT_GENERATE_RESPONSE_PER_MINUTE) || 20;
-    const rateLimit = await checkRateLimit({
+    const rateLimited = await enforceRateLimit({
       scope: 'generate:response',
       identifier: user.id || clientIp,
       limit,
-      windowSeconds: 60,
+      logger,
+      logEvent: 'generate.response.rate_limited',
     });
+    if (rateLimited) return rateLimited;
 
-    if (!rateLimit.allowed) {
-      logger.warn('generate.response.rate_limited', { userId: user.id, limit, retryAfterSeconds: rateLimit.retryAfterSeconds });
-      return NextResponse.json(
-        { ok: false, error: 'Rate limit exceeded. Please try again shortly.', retryAfterSeconds: rateLimit.retryAfterSeconds },
-        {
-          status: 429,
-          headers: {
-            'Retry-After': String(rateLimit.retryAfterSeconds),
-            'X-RateLimit-Limit': String(limit),
-            'X-RateLimit-Remaining': String(rateLimit.remaining),
-            'X-RateLimit-Reset': String(rateLimit.resetAtUnix),
-          },
-        }
-      );
-    }
-
-    // Idempotency guard
+    // Idempotency guard — return the prior result if this exact key already produced one.
     if (idempotencyKey) {
       const { data: existingMessages, error: existingError } = await supabase
         .from('messages')
@@ -107,13 +124,10 @@ export async function POST(request: NextRequest) {
 
     const start = Date.now();
 
-    let autoTask: InternalTask | null = null;
-    if (mode === 'Auto') {
-      autoTask = await selectTaskForAutoMode(draft);
-    }
-    const task: InternalTask = mapUiModeToInternalTask(mode, autoTask);
-
-    const initialStatus = mode === 'Auto' ? 'analyzing_task' : 'generating';
+    // Resolve task: explicit UI mode bypasses Gemini classification.
+    const autoTask: InternalTask | null = mode === 'Auto' ? await selectTaskForAutoMode(draft) : null;
+    const task: InternalTask = mode === 'Auto' ? (autoTask ?? 'none') : 'diagnostic';
+    const initialStatus: AssistantMessageMeta['status'] = mode === 'Auto' ? 'analyzing_task' : 'generating';
 
     const { data: placeholderData, error: placeholderError } = await supabase
       .from('messages')
@@ -140,6 +154,8 @@ export async function POST(request: NextRequest) {
     } else {
       placeholderMessageId = placeholderData.message_id;
 
+      // For Auto mode, transition the placeholder from "analyzing" to "generating"
+      // so the UI's thinking-phase indicator advances before streaming begins.
       if (mode === 'Auto' && autoTask) {
         await supabase
           .from('messages')
@@ -158,51 +174,39 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // task === 'none': static response, no streaming needed
+    const buildFinalMeta = (latencyMs: number): AssistantMessageMeta => ({
+      status: 'complete',
+      images: [],
+      task,
+      latencyMs,
+      showImages,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
+
+    // task === 'none': static response, no streaming needed.
     if (task === 'none') {
       const resultText =
         'The description does not appear to be a radiology or clinical imaging finding. Please describe imaging features, mass characteristics, or clinical findings.';
       const noneLatencyMs = Date.now() - start;
-      const noneMeta = {
-        status: 'complete' as const,
-        images: [],
-        task,
-        latencyMs: noneLatencyMs,
-        showImages,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
-      };
 
-      let noneMessageId: string | null = null;
-      if (placeholderMessageId) {
-        const { data: updatedData, error: updateError } = await supabase
-          .from('messages')
-          .update({ content: resultText, meta: noneMeta })
-          .eq('message_id', placeholderMessageId)
-          .eq('user_id', user.id)
-          .select('message_id')
-          .single();
-        if (updateError) {
-          logger.error('generate.response.placeholder_update_failed', updateError, { chatId, userId: user.id });
-          return NextResponse.json({ ok: false, error: 'Failed to update assistant message' }, { status: 500 });
-        }
-        noneMessageId = updatedData.message_id;
-      } else {
-        const { data: newMsg, error: insertError } = await supabase
-          .from('messages')
-          .insert({ chat_id: chatId, user_id: user.id, role: 'assistant', content: resultText, meta: noneMeta })
-          .select('message_id')
-          .single();
-        if (insertError) {
-          logger.error('generate.response.insert_failed', insertError, { chatId, userId: user.id, task });
-          return NextResponse.json({ ok: false, error: 'Failed to save assistant message' }, { status: 500 });
-        }
-        noneMessageId = newMsg.message_id;
+      const { messageId, error } = await writeAssistantMessage(supabase, {
+        chatId,
+        userId: user.id,
+        placeholderMessageId,
+        content: resultText,
+        meta: buildFinalMeta(noneLatencyMs),
+      });
+
+      if (error) {
+        logger.error('generate.response.none_persist_failed', error, { chatId, userId: user.id });
+        return NextResponse.json({ ok: false, error: 'Failed to save assistant message' }, { status: 500 });
       }
+
       await supabase.from('chats').update({ updated_at: new Date().toISOString() }).eq('chat_id', chatId).eq('user_id', user.id);
-      return NextResponse.json({ ok: true, task, latencyMs: noneLatencyMs, messageId: noneMessageId });
+      return NextResponse.json({ ok: true, task, latencyMs: noneLatencyMs, messageId });
     }
 
-    // task === 'diagnostic': stream Gemini response via SSE
+    // task === 'diagnostic': stream Gemini response via SSE.
     const encoder = new TextEncoder();
     const queue: Uint8Array[] = [];
     let streamDone = false;
@@ -252,48 +256,23 @@ export async function POST(request: NextRequest) {
         }
 
         const textLatencyMs = Date.now() - start;
-        const finalMeta = {
-          status: 'complete' as const,
-          images: [],
-          task,
-          latencyMs: textLatencyMs,
-          showImages,
-          ...(idempotencyKey ? { idempotencyKey } : {}),
-        };
+        const { messageId, error: persistError } = await writeAssistantMessage(supabase, {
+          chatId,
+          userId: user.id,
+          placeholderMessageId,
+          content: fullText,
+          meta: buildFinalMeta(textLatencyMs),
+        });
 
-        let insertedMessageId: string | null = null;
-        if (placeholderMessageId) {
-          const { data: updatedData, error: updateError } = await supabase
-            .from('messages')
-            .update({ content: fullText, meta: finalMeta })
-            .eq('message_id', placeholderMessageId)
-            .eq('user_id', user.id)
-            .select('message_id')
-            .single();
-          if (updateError) {
-            logger.error('generate.response.placeholder_update_failed', updateError, { chatId, userId: user.id });
-            send({ error: 'Failed to persist generated message' });
-            closeStream();
-            return;
-          }
-          insertedMessageId = updatedData.message_id;
-        } else {
-          const { data: newMsg, error: insertError } = await supabase
-            .from('messages')
-            .insert({ chat_id: chatId, user_id: user.id, role: 'assistant', content: fullText, meta: finalMeta })
-            .select('message_id')
-            .single();
-          if (insertError) {
-            logger.error('generate.response.insert_failed', insertError, { chatId, userId: user.id, task });
-            send({ error: 'Failed to save assistant message' });
-            closeStream();
-            return;
-          }
-          insertedMessageId = newMsg.message_id;
+        if (persistError) {
+          logger.error('generate.response.persist_failed', persistError, { chatId, userId: user.id });
+          send({ error: 'Failed to persist generated message' });
+          closeStream();
+          return;
         }
 
         await supabase.from('chats').update({ updated_at: new Date().toISOString() }).eq('chat_id', chatId).eq('user_id', user.id);
-        send({ done: true, task, latencyMs: textLatencyMs, messageId: insertedMessageId });
+        send({ done: true, task, latencyMs: textLatencyMs, messageId });
         closeStream();
       } catch (err) {
         logger.error('generate.response.stream_bg_error', err, { chatId, userId: user.id });

@@ -1,23 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/auth";
-import { createRequestLogger } from "@/lib/observability/logger";
+import { buildRouteContext, unauthorizedResponse } from "@/lib/api/route-helpers";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ chatID: string }> },
 ) {
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const logger = createRequestLogger({
-    requestId,
-    route: "/api/stella/chats/[chatID]/messages",
-    method: "GET",
-  });
+  const { logger } = buildRouteContext(request, "/api/stella/chats/[chatID]/messages", "GET");
 
   const { chatID } = await params;
   const { supabase, user } = await getAuthenticatedUser();
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "User not authenticated" }, { status: 401 });
-  }
+  if (!user) return unauthorizedResponse();
 
   const { data, error } = await supabase
     .from("messages")

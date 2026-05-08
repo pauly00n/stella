@@ -17,16 +17,22 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AUTH_ROUTES } from "@/lib/auth/routes";
 
-function getErrorCode(error: unknown): string | number | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const candidate = error as { status?: unknown; code?: unknown };
-  if (typeof candidate.code === "string" || typeof candidate.code === "number") {
-    return candidate.code;
-  }
-  if (typeof candidate.status === "string" || typeof candidate.status === "number") {
-    return candidate.status;
-  }
-  return undefined;
+const EXISTING_USER_PHRASES = [
+  "already registered",
+  "already exists",
+  "user already registered",
+  "email address is already registered",
+  "email already registered",
+  "user with this email address has already been registered",
+  "invalid login credentials",
+];
+
+function isExistingUserError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const err = error as { message?: unknown; status?: unknown; code?: unknown };
+  const message = String(err.message ?? "").toLowerCase();
+  if (EXISTING_USER_PHRASES.some((phrase) => message.includes(phrase))) return true;
+  return err.status === 422 || err.code === 422 || err.code === "422";
 }
 
 export function SignUpForm({
@@ -42,18 +48,17 @@ export function SignUpForm({
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
     setError(null);
 
     if (password !== repeatPassword) {
       setError("Passwords do not match");
-      setIsLoading(false);
       return;
     }
 
+    setIsLoading(true);
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const supabase = createClient();
+      const { error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -61,62 +66,17 @@ export function SignUpForm({
         },
       });
 
-      if (error) {
-        // Check if the error is about user already existing
-        const errorMessage = (error.message || '').toLowerCase();
-        const errorCode = getErrorCode(error) ?? '';
-        
-        // Check various possible error messages and status codes
-        if (errorMessage.includes('already registered') || 
-            errorMessage.includes('already exists') ||
-            errorMessage.includes('user already registered') ||
-            errorMessage.includes('email address is already registered') ||
-            errorMessage.includes('email already registered') ||
-            errorMessage.includes('user with this email address has already been registered') ||
-            errorCode === 422 ||
-            errorCode === '422') {
+      if (signUpError) {
+        if (isExistingUserError(signUpError)) {
           router.push("/sign-up-exists");
           return;
         }
-        throw error;
+        throw signUpError;
       }
-      
-      // If no error but also no user created, might indicate existing user
-      // (Supabase might silently fail without error if email exists)
-      if (!data.user) {
-        // Try to check if we can sign in (which would confirm email exists)
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password: password + '_wrong', // Deliberately wrong password
-        });
-        
-        // If we get a password error (not "email not found"), email exists
-        if (signInError && (
-          signInError.message?.toLowerCase().includes('invalid login') ||
-          signInError.message?.toLowerCase().includes('incorrect password') ||
-          signInError.message?.toLowerCase().includes('email not confirmed')
-        )) {
-          router.push("/sign-up-exists");
-          return;
-        }
-      }
-      
+
       router.push("/sign-up-success");
-    } catch (error: unknown) {
-      // If it's a Supabase error, check it again
-      if (error && typeof error === 'object' && 'message' in error) {
-        const errorMessage = String(error.message).toLowerCase();
-        if (errorMessage.includes('already registered') || 
-            errorMessage.includes('already exists') ||
-            errorMessage.includes('user already registered') ||
-            errorMessage.includes('email address is already registered') ||
-            errorMessage.includes('email already registered') ||
-            errorMessage.includes('invalid login credentials')) {
-          router.push("/sign-up-exists");
-          return;
-        }
-      }
-      setError(error instanceof Error ? error.message : "An error occurred");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An error occurred");
       setIsLoading(false);
     }
   };
@@ -143,9 +103,7 @@ export function SignUpForm({
                 />
               </div>
               <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="password">Password</Label>
-                </div>
+                <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
                   type="password"
@@ -155,9 +113,7 @@ export function SignUpForm({
                 />
               </div>
               <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="repeat-password">Repeat Password</Label>
-                </div>
+                <Label htmlFor="repeat-password">Repeat Password</Label>
                 <Input
                   id="repeat-password"
                   type="password"

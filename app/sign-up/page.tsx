@@ -1,6 +1,8 @@
 import { SignUpForm } from "@/components/sign-up-form";
-import { ENABLE_SIGNUP } from "@/lib/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+// Toggle to re-enable public sign-up.
+const ENABLE_SIGNUP = false;
 
 export default function Page() {
   return (
@@ -11,9 +13,7 @@ export default function Page() {
         ) : (
           <Card>
             <CardHeader>
-              <CardTitle className="text-2xl">
-                Sign-up
-              </CardTitle>
+              <CardTitle className="text-2xl">Sign-up</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <p>We are currently testing Ask Stella! with a limited group of users.</p>
